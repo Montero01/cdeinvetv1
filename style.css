@@ -390,6 +390,42 @@ dialog video, .scanner-video { display: block; width: 100%; max-height: 46dvh; b
 .rule-card { min-width: 0; padding-top: 18px; border-top: 1px solid var(--line); margin-top: 18px; }
 .rule-card .toolbar { margin: 12px 0 0; }
 .rule-meta { color: var(--muted); font-size: .76rem; line-height: 1.65; overflow-wrap: anywhere; }
+/* Necessidade de compra visível antes dos filtros; quantidades em chapas. */
+.replenishment-banner {
+  padding: 18px 20px;
+  border-left: 3px solid var(--chart-warning);
+  background: var(--surface);
+  color: var(--text);
+}
+.replenishment-banner > h2:first-child {
+  padding: 0;
+  margin: 0 0 12px;
+  border: 0;
+  color: var(--text);
+  font-size: .98rem;
+  line-height: 1.4;
+}
+.replenishment-banner > p { margin: 0 0 12px; }
+.replenishment-banner > p:last-child { margin-bottom: 0; }
+.replenishment-banner table { width: 100%; table-layout: fixed; font-size: .82rem; }
+.replenishment-banner th { background: var(--surface-alt); white-space: normal; font-size: .69rem; }
+.replenishment-banner th, .replenishment-banner td { padding: 10px 12px; vertical-align: middle; }
+.replenishment-banner th:first-child, .replenishment-banner td:first-child { width: 65%; overflow-wrap: anywhere; }
+.replenishment-banner th:last-child, .replenishment-banner td:last-child { width: 35%; text-align: right; font-variant-numeric: tabular-nums; }
+.replenishment-banner td:last-child { font-weight: 700; color: var(--text); }
+.replenishment-banner .badge { background: var(--warning-tint); color: var(--warning); border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent); }
+.replenishment-banner .empty-state { margin: 0; padding: 14px; text-align: left; font-size: .81rem; }
+.chart-metric-control { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0 0 16px; min-width: 0; }
+.chart-metric-control label { margin: 0; color: var(--muted); font-size: .76rem; font-weight: 600; }
+.chart-metric-control select { width: auto; max-width: 100%; min-width: 0; min-height: 40px; padding: 8px 32px 8px 10px; font-size: .8rem; background-color: var(--surface); }
+.chart-grid > .chart-panel:last-child:nth-child(odd), .charts-grid > .dashboard-chart:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.scan-feedback { display: block; width: 100%; padding: 14px 16px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-alt); color: var(--text); font-size: .84rem; line-height: 1.65; margin: 14px 0; overflow-wrap: anywhere; }
+.scan-feedback:empty { display: none; }
+.scan-feedback.success { border-color: color-mix(in srgb, var(--success) 35%, transparent); border-left: 3px solid var(--success); color: var(--success); background: var(--success-tint); }
+.scan-feedback.error { border-color: color-mix(in srgb, var(--danger) 35%, transparent); border-left: 3px solid var(--danger); color: var(--danger); background: var(--danger-tint); }
+.scan-feedback > strong { display: block; font-size: .88rem; line-height: 1.5; margin-bottom: 4px; }
+.scan-feedback > p { margin: 0; font-size: .81rem; }
+.scan-session-count { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; max-width: 100%; min-height: 32px; margin: 12px 0 0; padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface-alt); font-size: .75rem; line-height: 1.5; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .mobile-menu, .pdi-mobile-menu, #menu-toggle { display: none; }
 .nav-backdrop { display: none; }
 @media (min-width: 961px) { .app-sidebar, #app-sidebar { transform: none !important; } .nav-backdrop { display: none !important; } }
@@ -481,6 +517,14 @@ dialog video, .scanner-video { display: block; width: 100%; max-height: 46dvh; b
   .chart-body { padding: 14px; }
   .chart-legend { gap: 8px 13px; font-size: .73rem; }
   .chart-empty { min-height: 180px; }
+  .replenishment-banner { padding: 16px; }
+  .replenishment-banner th, .replenishment-banner td { padding: 10px 8px; }
+  .replenishment-banner th:first-child, .replenishment-banner td:first-child { width: 60%; }
+  .replenishment-banner th:last-child, .replenishment-banner td:last-child { width: 40%; }
+  .chart-metric-control { align-items: stretch; gap: 7px; }
+  .chart-metric-control label { flex-basis: 100%; }
+  .chart-metric-control select { width: 100%; min-height: 44px; font-size: .87rem; }
+  .scan-feedback { padding: 13px 14px; }
   .item-label { padding: 18px; }
   dl { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   dd { margin-bottom: 12px; }

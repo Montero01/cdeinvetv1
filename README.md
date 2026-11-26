@@ -58,7 +58,7 @@ Etiqueta horizontal de **100 mm de largura × 60 mm de altura**, com QR à esque
 
 ## Dashboards e reposição
 
-A Visão geral reúne cinco indicadores: chapas úteis, área útil em caixas, área útil avulsa, percentual de chapas avariadas e reposição sugerida. Quatro gráficos expansíveis apresentam área útil por tipo de vidro, estoque útil por galpão (caixas/avulsas), composição de chapas úteis/avariadas e evolução da área útil nas conferências concluídas. Os gráficos usam datas reais; variação de estoque não é tratada automaticamente como venda, consumo ou quebra.
+A Visão geral reúne cinco indicadores: chapas úteis, área útil em caixas, área útil avulsa, percentual de chapas avariadas e reposição sugerida. Cinco gráficos expansíveis apresentam estoque por tipo de vidro, estoque por galpão (caixas/avulsas), composição de chapas úteis/avariadas, evolução do estoque nas conferências concluídas e necessidade de compra por tipo de vidro. Os gráficos de estoque e evolução permitem alternar entre quantidade de chapas úteis e m² úteis; os indicadores de caixas e avulsas também mostram suas quantidades. Os gráficos usam datas reais; variação de estoque não é tratada automaticamente como venda, consumo ou quebra.
 
 Os filtros de galpão, tipo, cor e espessura afetam o recorte atual dos gráficos de estoque. O período de datas filtra somente a evolução histórica, sem transformar o saldo atual em um saldo retroativo. A fonte dos avulsos é sempre a última conferência concluída: contagens de dias distintos e rascunhos ativos não são somados.
 
@@ -95,3 +95,13 @@ A comparação de tipo, cor, galpão e regras de reposição normaliza a represe
 Os cadastros históricos e IDs foram preservados. A interface apresenta os nomes com espaçamento consistente; novos registros usam a grafia canônica do cadastro. Tentar adicionar uma opção equivalente retorna o cadastro existente. Para tipos realmente ausentes, a mensagem agora usa o nome do campo em português e indica o número do registro com problema. Importações continuam atômicas.
 
 `sql/catalog-normalization.sql` e `sql/catalog-unicode-space.sql` registram a correção; `tests/catalog-normalization.sql` reproduz a entrada com o cadastro real de dois espaços, testa formatos de planilha, ausência de duplicação, rótulos canônicos, idempotência, erro de lote e galpões de snapshots antigos. O teste roda com rollback e não grava entradas fictícias.
+
+## Resumo geral de reposição e câmera contínua
+
+Antes dos filtros, a Visão geral apresenta a **reposição geral**, agrupada apenas por tipo de vidro e quantidade de chapas necessárias. O cálculo parte das regras ativas por SKU (incluindo cor, espessura e dimensões); só depois soma as necessidades por tipo. Portanto, excedente de uma dimensão não compensa falta de outra. Esse resumo é global e não muda com os filtros do recorte abaixo. Quando não há regras, informa que a configuração está pendente; quando as regras existem sem necessidade, mostra que não há reposição sugerida. A base incompleta permanece sinalizada como provisória.
+
+O quinto gráfico, **Chapas a comprar**, representa a necessidade calculada pelos mínimos e alvos, não pedidos de compra confirmados ou mercadoria em trânsito. Ele segue o recorte de vidro; a regra de reposição continua utilizando todos os galpões. Nenhuma compra é criada automaticamente.
+
+No inventário diário, a câmera permanece aberta após cada leitura. O aplicativo confirma o item e fica pronto para a próxima etiqueta no mesmo vídeo, sem reiniciar o leitor. Leituras repetidas da mesma caixa são reconhecidas sem duplicar registros; QR e código de barras que identificam a mesma caixa compartilham a identificação. Uma falha permite nova tentativa mantendo o identificador da operação. A câmera só é encerrada quando o usuário fecha a janela ou sai da sessão. Respostas pendentes não devem reabrir a janela nem restaurar dados de uma sessão encerrada.
+
+As quantidades históricas vêm dos registros detalhados das conferências, sem converter m² em chapas por uma dimensão presumida. Dados históricos sem base quantitativa ficam com lacunas. Os testes de BI, SVG e DOM cobrem as quantidades, resumo sem filtros, quinto gráfico, câmera contínua, duplicidade e limpeza do leitor. O teste da câmera física ainda depende do navegador e do aparelho utilizado no galpão.

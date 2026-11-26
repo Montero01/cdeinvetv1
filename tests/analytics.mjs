@@ -9,7 +9,7 @@ const rule=(id,minimum_sheets=12,target_sheets=20,extra={})=>({id,kind:'reorder_
 const records=[box('a','sealed'),box('b','sealed',4,0,{warehouse:'Galpão 2',type:'COMUM'}),box('o','opened',999),box('m','missing',999),inv('i1','2026-11-20'),loose('l1','i1',70),inv('i2','2026-11-25'),loose('l2','i2'),inv('draft','2026-11-26',[],'active'),loose('ld','draft',100),rule('r')];
 let a=buildAnalytics(records);
 assert.equal(a.kpis.useful_sheets,16);assert.equal(a.kpis.useful_m2,32);assert.equal(a.kpis.sealed_useful_m2,24);assert.equal(a.kpis.loose_useful_m2,8);assert.equal(a.kpis.physical_sheets,19);assert.equal(a.kpis.damaged_sheets,3);assert.equal(a.kpis.damaged_percent,15.789474);assert.equal(a.meta.last_closed_id,'i2');assert.equal(a.meta.provisional,true);assert.equal(a.meta.has_active,true);assert.equal(a.replenishment[0].triggered,false);assert.equal(a.replenishment[0].needed_sheets,0);
-assert.equal(a.charts.by_type.length,1);assert.equal(a.charts.by_type[0].value,32);assert.equal(a.charts.by_warehouse.length,2);assert.deepEqual(a.charts.by_warehouse[0],{label:'Galpão 1',sealed_m2:16,loose_m2:8});assert.deepEqual(a.charts.condition,[{label:'Chapas úteis',value:16},{label:'Chapas avariadas',value:3}]);assert.deepEqual(a.charts.evolution.map(p=>[p.date,p.useful_m2]),[['2026-11-20',34],['2026-11-25',34]]);
+assert.equal(a.charts.by_type.length,1);assert.equal(a.charts.by_type[0].value,32);assert.equal(a.charts.by_warehouse.length,2);assert.deepEqual(a.charts.by_warehouse[0],{label:'Galpão 1',sealed_m2:16,loose_m2:8,sealed_sheets:8,loose_sheets:4});assert.deepEqual(a.charts.condition,[{label:'Chapas úteis',value:16},{label:'Chapas avariadas',value:3}]);assert.deepEqual(a.charts.evolution.map(p=>[p.date,p.useful_m2]),[['2026-11-20',34],['2026-11-25',34]]);
 // Threshold is inclusive and excludes damaged sheets; target is final stock, not additive.
 a=buildAnalytics(records.map(r=>r.id==='r'?rule('r',16,20):r));assert.equal(a.replenishment[0].triggered,true);assert.equal(a.kpis.replenishment_count,1);assert.equal(a.kpis.replenishment_sheets,4);assert.equal(a.kpis.replenishment_m2,8);
 // Warehouse filter changes charts, never global replenishment availability.
@@ -42,4 +42,24 @@ assert.equal(buildAnalytics(normalizedRows,{color:'Fume'}).kpis.useful_sheets,0,
 assert.equal(buildAnalytics(normalizedRows,{type:'HabitatNeutro'}).kpis.useful_sheets,0,'do not fuzzy-join product words');
 assert.equal(buildAnalytics(normalizedRows,{type:'Habitat Neutro Solar'}).replenishment.length,0);
 assert.equal(validateRule({...s,type:' Habitat  Neutro ',color:'Fume\u0302',minimum_sheets:1,target_sheets:2}).type,'Habitat Neutro');
-console.log('PASS: BI quatro séries, estoque útil sem duplicidade, última contagem fechada, reposição global e limites, filtros, histórico sem valores inventados.');
+console.log('PASS: BI cinco séries, estoque útil sem duplicidade, última contagem fechada, reposição global e limites, filtros, histórico sem valores inventados.');
+
+// Quantity series are useful sheet counts, never m² divided by a guessed size.
+const quantityBI=buildAnalytics(records);
+assert.equal(quantityBI.kpis.sealed_useful_sheets,12);assert.equal(quantityBI.kpis.loose_useful_sheets,4);assert.equal(quantityBI.charts.by_type[0].useful_sheets,16);
+assert.deepEqual(quantityBI.charts.evolution.map(x=>[x.date,x.useful_sheets,x.physical_sheets]),[['2026-11-20',17,20],['2026-11-25',17,20]]);
+const historyWithoutQty=buildAnalytics([{id:'history',kind:'inventory',work_date:'2026-11-01',data:{status:'closed',summary:{useful_m2:500,total_m2:550}}}]);
+assert.equal(historyWithoutQty.charts.evolution[0].useful_m2,500);assert.equal(historyWithoutQty.charts.evolution[0].useful_sheets,null);assert.equal(historyWithoutQty.charts.evolution[0].physical_sheets,null);assert.equal(historyWithoutQty.charts.evolution[0].available_sheets,false);assert.equal(historyWithoutQty.meta.history_quantity_incomplete,true);assert.equal(historyWithoutQty.meta.history_m2_incomplete,false);assert.equal(historyWithoutQty.meta.history_incomplete,true);
+const historyKnownQty=buildAnalytics([{id:'history',kind:'inventory',work_date:'2026-11-01',data:{status:'closed',summary:{total_sheets:30,sealed_damaged:2,loose_damaged:1,total_m2:200}}}]);
+assert.equal(historyKnownQty.charts.evolution[0].useful_sheets,27);assert.equal(historyKnownQty.charts.evolution[0].physical_sheets,30);assert.equal(historyKnownQty.charts.evolution[0].useful_m2,null);
+const quantitySizes=buildAnalytics([inv('sizes','2026-11-25',[{...group,sheets:10,damaged:2,m2:20},{...group,width_mm:2000,sheets:10,damaged:0,m2:40}])]);
+assert.equal(quantitySizes.charts.evolution[0].useful_sheets,18);assert.equal(quantitySizes.charts.evolution[0].useful_m2,56);
+// Suggested replenishment intentionally aggregates exact SKU needs only by type.
+const purchaseRecords=[box('first','sealed',2,1),rule('type-a',3,10),rule('type-b',2,5,{type:' COMUM ',color:'Verde',width_mm:2000}),rule('disabled',100,200,{type:'Laminado',enabled:false}),rule('none-needed',0,20,{type:'Espelho'}),box('enough','sealed',30,0,{type:'Espelho'})];
+const purchaseBI=buildAnalytics(purchaseRecords);
+assert.deepEqual(purchaseBI.charts.replenishment_by_type,[{label:'Comum',value:14,needed_sheets:14,needed_m2:38}]);
+assert.equal(purchaseBI.kpis.replenishment_sheets,14);assert.equal(purchaseBI.kpis.replenishment_count,2);
+const filteredPurchase=buildAnalytics(purchaseRecords,{color:'Verde',warehouse:'Outro galpão'});assert.equal(filteredPurchase.charts.replenishment_by_type[0].value,5);assert.equal(filteredPurchase.replenishment[0].needed_sheets,5);
+assert.equal(buildAnalytics(purchaseRecords,{}).charts.replenishment_by_type[0].value,14,'banner uses a separate unfiltered analytics result');
+assert.equal(buildAnalytics([rule('disabled',100,200,{enabled:false})]).charts.replenishment_by_type.length,0);
+console.log('PASS: séries em quantidade, reposição por tipo, filtros globais e lacunas de histórico sem inferência.');
