@@ -20,7 +20,7 @@ Use o e-mail e senha já cadastrados no PDI. A sessão deste aplicativo é separ
 - Caixas abertas em dias anteriores não voltam a ser exigidas como caixas lacradas. Os avulsos restantes são contados novamente.
 - O cruzamento dos avulsos usa tipo, cor, espessura, largura e altura. O sistema apresenta as caixas candidatas e a capacidade das novas aberturas, mas não inventa a nota fiscal de origem. Sobras antigas, consumo e múltiplas caixas impedem uma atribuição física segura. A diferença entre avulsas e capacidade aberta hoje **não é automaticamente quebra ou consumo**.
 - Importação acrescenta caixas novas. Há prévia; qualquer linha inválida rejeita o lote inteiro. Fórmulas não são aceitas. Repetir a mesma requisição após falha de rede é seguro; reenviar o arquivo como uma nova importação cria novas caixas. Não importar novamente um lote já concluído.
-- No piloto, entradas e inventários encerrados são preservados. A remoção de contagem avulsa só ocorre enquanto a conferência estiver ativa e fica auditada.
+- A remoção de contagem avulsa ocorre enquanto a conferência estiver ativa e fica auditada. Gerência, diretoria e master também podem excluir registros de teste conforme as regras abaixo.
 - As fotos são apenas links HTTPS opcionais. Não há upload de fotos no Supabase nem envio de dados para serviços de QR externos. Armazenamento de imagens/Drive será definido em outra etapa. Um link do Drive exige permissão de visualização concedida pelo proprietário.
 - A câmera precisa de HTTPS e permissão do aparelho. O leitor oferece QR e Code128, com campo para digitação/leitor físico como alternativa. A etiqueta abre a página autenticada daquele item.
 
@@ -43,3 +43,15 @@ A verificação do Supabase não encontrou alertas novos para este módulo. Aler
 ## Bibliotecas locais
 
 Sem build obrigatório; GitHub Pages serve os arquivos da raiz. Bibliotecas locais versionadas em `vendor/`: Supabase JS 2.86.0 (MIT), SheetJS CE 0.20.3 (Apache-2.0), QRCode.js 1.0.0 (MIT), JsBarcode 3.12.1 (MIT), ZXing Browser 0.1.5 (MIT). Veja `vendor/manifest.json` para hashes. Dependência de testes: linkedom 0.18.12 (ISC).
+
+## Exclusão de registros de teste
+
+Gerência, diretoria e master veem **× Excluir inventário** na conferência em andamento, no histórico e na conferência concluída. **× Excluir item** fica na página individual da caixa. É necessário informar um motivo e confirmar a exclusão. A ação remove o registro operacional; os logs, autoria, motivo e dados excluídos permanecem na auditoria.
+
+Somente o último inventário pode ser excluído. Se houver dias posteriores, remover do mais recente para o mais antigo. Excluir uma contagem concluída restaura o estado anterior das caixas (inclusive não localizadas), remove suas leituras, avulsas e decisões e permite iniciar novamente naquela data. Uma caixa usada em inventários só pode ser excluída após remover as contagens que a referenciam. Isso evita alterar o histórico físico de outras conferências. A exclusão direta no editor do Supabase pode falhar por esses vínculos; usar a ação do aplicativo mantém a auditoria e resolve as dependências.
+
+`tests/delete-records.sql` validou exclusões gerenciais, bloqueio de operadores, ordem temporal, vínculos, restauração, auditoria e reenvio seguro com fixtures isoladas em rollback. Nenhum dado de teste do usuário foi apagado automaticamente.
+
+## Impressão da etiqueta
+
+Etiqueta horizontal de **100 mm de largura × 60 mm de altura**, com QR à esquerda, identificação à direita e barras na parte inferior. Na impressora selecionar papel 100 × 60 mm, escala 100% / tamanho real, margens zero e desativar cabeçalhos/rodapés. O driver pode exigir cadastrar esse tamanho personalizado. Prévia e impressão usam o mesmo formato; impressão força fundo branco e texto preto. Há área branca ao redor do QR e das barras para leitura. Validar uma etiqueta no equipamento antes de imprimir o lote.

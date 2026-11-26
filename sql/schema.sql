@@ -111,6 +111,7 @@ create function invd_private.command(p_action text,p_request_id uuid,p_payload j
 declare actor public.profiles;session public.inventarydaily_table;box public.inventarydaily_table;prev public.inventarydaily_table;row_id uuid;sid uuid;out jsonb;v jsonb;x jsonb;ids jsonb:='[]';d date;cat text;val text;n integer;
 begin
 if not invd_private.allowed() then raise exception 'Seu perfil não tem acesso ao inventário.' using errcode='42501';end if;
+if p_action in('inventory_delete','box_delete') and not invd_private.manager() then raise exception 'Somente gerência, diretoria e master podem excluir.' using errcode='42501';end if;
 if p_request_id is null or p_payload is null or jsonb_typeof(p_payload)<>'object' or octet_length(p_payload::text)>1000000 then raise exception 'Requisição inválida ou muito grande.';end if;
 select * into actor from public.profiles where id=auth.uid();
 perform pg_advisory_xact_lock(763126,1);
@@ -118,7 +119,42 @@ select * into prev from public.inventarydaily_table where kind='log' and data->>
 if prev.id is not null then
  if prev.created_by<>actor.id or prev.data->>'action'<>p_action or prev.data->'payload'<>p_payload then raise exception 'Identificador de requisição já utilizado.';end if;
  return prev.data->'result';end if;
-if p_action='catalog_add' then
+if p_action in('inventory_delete','box_delete') then
+if length(trim(coalesce(p_payload->>'reason',''))) not between 3 and 2000 then raise exception 'Informe o motivo da exclusão (de 3 a 2000 caracteres).';end if;
+select * into prev from public.inventarydaily_table where id=(p_payload->>'id')::uuid and kind=case when p_action='inventory_delete' then 'inventory' else 'box' end for update;
+if prev.id is null then raise exception 'Registro não encontrado. Atualize os dados antes de tentar novamente.';end if;
+if p_action='inventory_delete' then
+session:=prev;sid:=session.id;
+if exists(select 1 from public.inventarydaily_table i where i.kind='inventory' and i.work_date>session.work_date)then raise exception 'Existe um inventário posterior. Exclua primeiro o inventário mais recente para preservar a sequência do estoque.';end if;
+if session.data->>'status'='closed' then
+for box in select * from public.inventarydaily_table b where b.kind='box' and (session.data->'expected') @> jsonb_build_array(b.id)loop
+ val:=session.data->'before_states'->box.id::text->>'status';
+ if val is null then
+  -- Inventários do piloto anteriores à captura do estado: reconstituir pelo histórico preservado.
+  select case when x.kind='scan' then 'sealed' when x.data->>'outcome'='missing' then 'missing' when x.data->>'outcome'='opened' then 'opened' else 'sealed' end into val
+  from public.inventarydaily_table i join public.inventarydaily_table x on x.parent_id=i.id and x.kind in('scan','decision')
+  where i.kind='inventory' and i.data->>'status'='closed' and i.work_date<session.work_date and x.data->>'box_id'=box.id::text order by i.work_date desc limit 1;
+ end if;
+ val:=coalesce(val,'sealed');
+ v:=box.data||jsonb_build_object('status',val);
+ if box.data->>'opened_inventory_id'=sid::text then v:=v-'opened_inventory_id'-'opened_on';end if;
+ update public.inventarydaily_table set data=v,updated_at=now()where id=box.id;
+end loop;
+end if;
+select coalesce(jsonb_agg(to_jsonb(t)order by t.created_at,t.id),'[]')into v from public.inventarydaily_table t where parent_id=sid and kind in('scan','loose','decision');
+out:=jsonb_build_object('id',sid,'deleted',true,'deleted_kind','inventory','previous',to_jsonb(session),'children',v);
+-- Logs sobrevivem à exclusão sem uma chave estrangeira bloqueando o registro removido.
+update public.inventarydaily_table set parent_id=null,data=data||jsonb_build_object('deleted_parent_id',sid)where parent_id=sid and kind='log';
+delete from public.inventarydaily_table where parent_id=sid and kind in('scan','loose','decision');
+delete from public.inventarydaily_table where id=sid;
+sid:=null;
+else
+if exists(select 1 from public.inventarydaily_table i where i.kind='inventory' and (i.data->'expected') @> jsonb_build_array(prev.id))or exists(select 1 from public.inventarydaily_table x where x.kind in('scan','decision')and x.data->>'box_id'=prev.id::text)then raise exception 'Este item está vinculado a um inventário. Exclua primeiro os inventários que o utilizaram, começando pelo mais recente.';end if;
+out:=jsonb_build_object('id',prev.id,'deleted',true,'deleted_kind','box','previous',to_jsonb(prev));
+update public.inventarydaily_table set parent_id=null,data=data||jsonb_build_object('deleted_parent_id',prev.id)where parent_id=prev.id and kind='log';
+delete from public.inventarydaily_table where id=prev.id;
+end if;
+elsif p_action='catalog_add' then
 cat:=p_payload->>'category';val:=trim(p_payload->>'value');
 if cat not in('type','color','thickness','warehouse') or cat is null or val is null or length(val) not between 1 and 120 then raise exception 'Categoria ou valor inválido.';end if;
 if cat='thickness' then if val !~ '^[0-9]+([.][0-9]{1,3})?$' or val::numeric<=0 or val::numeric>100 then raise exception 'Espessura inválida.';end if;val:=trim(trailing '.' from trim(trailing '0' from to_char(val::numeric,'FM99990.000')));end if;
@@ -144,7 +180,7 @@ if exists(select 1 from public.inventarydaily_table where kind='inventory' and (
 select coalesce(jsonb_agg(id order by created_at,id),'[]') into ids from public.inventarydaily_table where kind='box' and data->>'status' in('sealed','missing');
 select coalesce(jsonb_agg(w order by w),'[]') into v from(select distinct data->>'warehouse' w from public.inventarydaily_table where kind='box' and data->>'status' in('sealed','missing') union select data->>'value' from public.inventarydaily_table where kind='catalog' and data->>'category'='warehouse')q;
 if jsonb_array_length(v)=0 then raise exception 'Cadastre ao menos um galpão antes de iniciar.';end if;
-insert into public.inventarydaily_table(kind,work_date,data,created_by,created_by_name)values('inventory',d,jsonb_build_object('status','active','expected',ids,'warehouses',v),actor.id,actor.full_name) returning id into row_id;out:=jsonb_build_object('id',row_id);
+insert into public.inventarydaily_table(kind,work_date,data,created_by,created_by_name)values('inventory',d,jsonb_build_object('status','active','expected',ids,'warehouses',v,'before_states',(select coalesce(jsonb_object_agg(id::text,jsonb_build_object('status',data->>'status')),'{}')from public.inventarydaily_table where kind='box' and data->>'status' in('sealed','missing'))),actor.id,actor.full_name) returning id into row_id;out:=jsonb_build_object('id',row_id);
 elsif p_action in('inventory_scan','inventory_loose','inventory_loose_remove','inventory_decide','inventory_finish') then
 if p_action='inventory_loose_remove' then select parent_id into sid from public.inventarydaily_table where id=(p_payload->>'id')::uuid and kind='loose';else sid:=(p_payload->>'inventory_id')::uuid;end if;
 select * into session from public.inventarydaily_table where id=sid and kind='inventory' for update;
