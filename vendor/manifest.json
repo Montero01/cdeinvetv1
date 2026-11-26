@@ -1,0 +1,22 @@
+{
+  "xlsx.js": {
+    "sha256": "cc015130aa8521e7f088f88898eba949ccdcbfb38df0bd129b44b7273c3a6f41",
+    "bytes": 951904
+  },
+  "qrcode.js": {
+    "sha256": "c541ef06327885a8415bca8df6071e14189b4855336def4f36db54bde8484f36",
+    "bytes": 19927
+  },
+  "zxing.js": {
+    "sha256": "b5ad3df920738ca7adcb74508d7e6b6a5b9024993fb9a0c702da1ad8964eca07",
+    "bytes": 395062
+  },
+  "supabase.js": {
+    "sha256": "6c6a807c5c8087d2ea1b3bfac3632b0bedff0a0700ee521a560a1893d364554e",
+    "bytes": 189339
+  },
+  "jsbarcode.js": {
+    "sha256": "9c6d079b69a763191e38de8f3d69a252cb2413ea8f35af15478a5a870c7edfa2",
+    "bytes": 66355
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "cdeinvetv1",
+  "version": "1.0.0-pilot",
+  "private": true,
+  "type": "module",
+  "scripts": {"test": "node tests/calculos.mjs && node tests/qa.mjs", "check": "node --check app.js && node --check utils.js"},
+  "devDependencies": {"linkedom": "0.18.12"}
+}
