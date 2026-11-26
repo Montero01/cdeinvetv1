@@ -5,13 +5,14 @@ revoke all on schema invd_private from public,anon;
 grant usage on schema invd_private to authenticated;
 create table public.inventarydaily_table (
  id uuid primary key default gen_random_uuid(),
- kind text not null check(kind in('access','catalog','box','inventory','scan','loose','decision','log')),
+ kind text not null check(kind in('access','catalog','box','inventory','scan','loose','decision','log','reorder_rule')),
  parent_id uuid references public.inventarydaily_table(id),
  work_date date not null default (now() at time zone 'America/Manaus')::date,
  data jsonb not null default '{}' check(jsonb_typeof(data)='object'),
  created_by uuid references public.profiles(id), created_by_name text not null default '',
  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
+create unique index invd_rule_sku on public.inventarydaily_table(lower(data->>'type'),lower(data->>'color'),((data->>'thickness_mm')::numeric),((data->>'width_mm')::numeric),((data->>'height_mm')::numeric)) where kind='reorder_rule';
 create index invd_created_by on public.inventarydaily_table(created_by);
 create index invd_parent on public.inventarydaily_table(parent_id,kind);
 create index invd_kind_time on public.inventarydaily_table(kind,created_at,id);
@@ -108,10 +109,10 @@ select jsonb_build_object(
 $$;
 
 create function invd_private.command(p_action text,p_request_id uuid,p_payload jsonb) returns jsonb language plpgsql security definer set search_path='' as $$
-declare actor public.profiles;session public.inventarydaily_table;box public.inventarydaily_table;prev public.inventarydaily_table;row_id uuid;sid uuid;out jsonb;v jsonb;x jsonb;ids jsonb:='[]';d date;cat text;val text;n integer;
+declare actor public.profiles;session public.inventarydaily_table;box public.inventarydaily_table;prev public.inventarydaily_table;row_id uuid;sid uuid;out jsonb;v jsonb;x jsonb;ids jsonb:='[]';d date;cat text;val text;n integer;qty numeric;existing_id uuid;
 begin
 if not invd_private.allowed() then raise exception 'Seu perfil não tem acesso ao inventário.' using errcode='42501';end if;
-if p_action in('inventory_delete','box_delete') and not invd_private.manager() then raise exception 'Somente gerência, diretoria e master podem excluir.' using errcode='42501';end if;
+if p_action in('inventory_delete','box_delete','reorder_rule_save') and not invd_private.manager() then raise exception 'Somente gerência, diretoria e master podem excluir ou gerenciar parâmetros de reposição.' using errcode='42501';end if;
 if p_request_id is null or p_payload is null or jsonb_typeof(p_payload)<>'object' or octet_length(p_payload::text)>1000000 then raise exception 'Requisição inválida ou muito grande.';end if;
 select * into actor from public.profiles where id=auth.uid();
 perform pg_advisory_xact_lock(763126,1);
@@ -119,7 +120,45 @@ select * into prev from public.inventarydaily_table where kind='log' and data->>
 if prev.id is not null then
  if prev.created_by<>actor.id or prev.data->>'action'<>p_action or prev.data->'payload'<>p_payload then raise exception 'Identificador de requisição já utilizado.';end if;
  return prev.data->'result';end if;
-if p_action in('inventory_delete','box_delete') then
+if p_action='reorder_rule_save' then
+v:='{}';
+foreach cat in array array['type','color']loop
+ val:=trim(p_payload->>cat);
+ if val is null or length(val)not between 1 and 120 then raise exception 'Informe o tipo e a cor do vidro.';end if;
+ select data->>'value'into val from public.inventarydaily_table where kind='catalog' and data->>'category'=cat and lower(data->>'value')=lower(val);
+ if val is null then raise exception 'Cadastre o tipo e a cor antes de criar a regra.';end if;
+ v:=v||jsonb_build_object(cat,val);
+end loop;
+foreach cat in array array['thickness_mm','width_mm','height_mm']loop
+ begin qty:=(p_payload->>cat)::numeric;exception when others then raise exception 'Espessura ou dimensão inválida.';end;
+ if qty is null or qty<=0 or qty<>round(qty,3)or qty>(case when cat='thickness_mm'then 100 else 20000 end) then raise exception 'Espessura ou dimensão fora do limite.';end if;
+ v:=v||jsonb_build_object(cat,trim_scale(qty));
+end loop;
+foreach cat in array array['minimum_sheets','target_sheets']loop
+ begin qty:=(p_payload->>cat)::numeric;exception when others then raise exception 'Mínimo e alvo devem ser quantidades inteiras de chapas.';end;
+ if qty is null or qty<0 or qty>1000000 or qty<>trunc(qty)then raise exception 'Mínimo e alvo devem ser inteiros entre 0 e 1000000.';end if;
+ v:=v||jsonb_build_object(cat,qty::bigint);
+end loop;
+if(v->>'target_sheets')::bigint<(v->>'minimum_sheets')::bigint then raise exception 'O estoque alvo não pode ser menor que o mínimo.';end if;
+if p_payload?'enabled' and jsonb_typeof(p_payload->'enabled')<>'boolean' then raise exception 'Situação da regra inválida.';end if;
+v:=v||jsonb_build_object('enabled',coalesce((p_payload->>'enabled')::boolean,true));
+row_id:=null;
+if nullif(p_payload->>'id','')is not null then
+ select * into prev from public.inventarydaily_table where id=(p_payload->>'id')::uuid and kind='reorder_rule'for update;
+ if prev.id is null then raise exception 'Regra não encontrada. Atualize os dados.';end if;
+ row_id:=prev.id;
+end if;
+select id into existing_id from public.inventarydaily_table where kind='reorder_rule' and lower(data->>'type')=lower(v->>'type') and lower(data->>'color')=lower(v->>'color')and(data->>'thickness_mm')::numeric=(v->>'thickness_mm')::numeric and(data->>'width_mm')::numeric=(v->>'width_mm')::numeric and(data->>'height_mm')::numeric=(v->>'height_mm')::numeric;
+if existing_id is not null and row_id is not null and existing_id<>row_id then raise exception 'Já existe uma regra para este vidro e estas dimensões. Edite a regra existente.';end if;
+if row_id is null and existing_id is not null then row_id:=existing_id;select * into prev from public.inventarydaily_table where id=row_id;end if;
+if row_id is null then
+ insert into public.inventarydaily_table(kind,data,created_by,created_by_name)values('reorder_rule',v,actor.id,actor.full_name)returning id into row_id;
+ out:=jsonb_build_object('id',row_id);
+else
+ update public.inventarydaily_table set data=v,updated_at=now()where id=row_id;
+ out:=jsonb_build_object('id',row_id,'previous',to_jsonb(prev));
+end if;
+elsif p_action in('inventory_delete','box_delete') then
 if length(trim(coalesce(p_payload->>'reason',''))) not between 3 and 2000 then raise exception 'Informe o motivo da exclusão (de 3 a 2000 caracteres).';end if;
 select * into prev from public.inventarydaily_table where id=(p_payload->>'id')::uuid and kind=case when p_action='inventory_delete' then 'inventory' else 'box' end for update;
 if prev.id is null then raise exception 'Registro não encontrado. Atualize os dados antes de tentar novamente.';end if;

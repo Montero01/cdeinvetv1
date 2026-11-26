@@ -3,6 +3,11 @@
   "version": "1.0.0-pilot",
   "private": true,
   "type": "module",
-  "scripts": {"test": "node tests/calculos.mjs && node tests/qa.mjs", "check": "node --check app.js && node --check utils.js"},
-  "devDependencies": {"linkedom": "0.18.12"}
+  "scripts": {
+    "test": "node tests/calculos.mjs && node tests/analytics.mjs && node tests/charts.mjs && node tests/qa.mjs",
+    "check": "node --check app.js && node --check utils.js && node --check analytics.js && node --check charts.js"
+  },
+  "devDependencies": {
+    "linkedom": "0.18.12"
+  }
 }

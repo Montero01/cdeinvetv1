@@ -26,7 +26,7 @@ Use o e-mail e senha já cadastrados no PDI. A sessão deste aplicativo é separ
 
 ## Dados e segurança
 
-Todos os registros deste módulo ficam em `public.inventarydaily_table`, separados por `kind`: acesso, catálogo, caixa, inventário, leitura, avulso, decisão e log. Fotos e XLSX binários não ficam na tabela. Não são alteradas tabelas de PCP, Caixa, Logística, E.G. ou contas do PDI.
+Todos os registros deste módulo ficam em `public.inventarydaily_table`, separados por `kind`: acesso, catálogo, caixa, inventário, leitura, avulso, decisão, regra de reposição e log. Fotos e XLSX binários não ficam na tabela. Não são alteradas tabelas de PCP, Caixa, Logística, E.G. ou contas do PDI.
 
 RLS restringe leitura; escrita direta por clientes é revogada. RPCs públicas são SECURITY INVOKER e delegam a funções privadas com autenticação, autorização, validação, bloqueio transacional e identificador de requisição. Os totais do encerramento são calculados no servidor. Auditoria registra autor, horário, ação, dados e resultado; somente gerência/diretoria/master consulta o log. A chave em `config.js` é **publishable**, não service-role.
 
@@ -55,3 +55,17 @@ Somente o último inventário pode ser excluído. Se houver dias posteriores, re
 ## Impressão da etiqueta
 
 Etiqueta horizontal de **100 mm de largura × 60 mm de altura**, com QR à esquerda, identificação à direita e barras na parte inferior. Na impressora selecionar papel 100 × 60 mm, escala 100% / tamanho real, margens zero e desativar cabeçalhos/rodapés. O driver pode exigir cadastrar esse tamanho personalizado. Prévia e impressão usam o mesmo formato; impressão força fundo branco e texto preto. Há área branca ao redor do QR e das barras para leitura. Validar uma etiqueta no equipamento antes de imprimir o lote.
+
+## Dashboards e reposição
+
+A Visão geral reúne cinco indicadores: chapas úteis, área útil em caixas, área útil avulsa, percentual de chapas avariadas e reposição sugerida. Quatro gráficos expansíveis apresentam área útil por tipo de vidro, estoque útil por galpão (caixas/avulsas), composição de chapas úteis/avariadas e evolução da área útil nas conferências concluídas. Os gráficos usam datas reais; variação de estoque não é tratada automaticamente como venda, consumo ou quebra.
+
+Os filtros de galpão, tipo, cor e espessura afetam o recorte atual dos gráficos de estoque. O período de datas filtra somente a evolução histórica, sem transformar o saldo atual em um saldo retroativo. A fonte dos avulsos é sempre a última conferência concluída: contagens de dias distintos e rascunhos ativos não são somados.
+
+Em **Cadastros → Parâmetros de reposição**, gerência/diretoria/master definem mínimo e alvo em chapas para cada combinação exata de tipo, cor, espessura, largura e altura. Não é necessário ter uma caixa desse vidro para criar a regra. É possível editar ou desativar a regra sem alterar o estoque. Cada SKU tem uma única regra global; regras ficam em `inventarydaily_table`, com `kind = reorder_rule`, e as alterações são auditadas.
+
+**Fórmula:** saldo útil = chapas em caixas fechadas + avulsas da última conferência concluída − avarias dessas mesmas chapas. Caixas abertas e não localizadas não entram como caixas em estoque. Se o saldo útil for menor ou igual ao mínimo e estiver abaixo do alvo, a sugestão será `alvo − saldo útil`; caso contrário, zero. A área sugerida é `chapas sugeridas × largura_mm × altura_mm ÷ 1.000.000`. Isso é uma indicação de reposição, não uma ordem de compra ou previsão de consumo.
+
+A regra considera **todos os galpões juntos**. O filtro visual de galpão não reduz a base usada para comparar o mínimo global; filtros de tipo/cor/espessura recortam as regras exibidas. A tela explicita essa diferença. Havendo conferência ativa ou nenhuma conferência concluída, a sugestão é provisória; a data da última conferência fica visível para avaliar a atualidade das avulsas.
+
+Validação: `tests/analytics.mjs` verifica fórmulas, limiares, avarias, estoque sem duplicidade e filtros. `tests/charts.mjs` verifica os quatro SVGs, dados vazios/zero, texto seguro e lacunas históricas. `tests/reorder-rules.sql` verifica autorização, limites, catálogo, unicidade, edição/inativação, auditoria e idempotência em uma transação com rollback.
