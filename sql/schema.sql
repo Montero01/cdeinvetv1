@@ -12,6 +12,7 @@ create table public.inventarydaily_table (
  created_by uuid references public.profiles(id), created_by_name text not null default '',
  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
+create index invd_created_by on public.inventarydaily_table(created_by);
 create index invd_parent on public.inventarydaily_table(parent_id,kind);
 create index invd_kind_time on public.inventarydaily_table(kind,created_at,id);
 create unique index invd_code on public.inventarydaily_table((data->>'code')) where kind='box';
