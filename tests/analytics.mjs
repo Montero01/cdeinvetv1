@@ -33,4 +33,13 @@ a=buildAnalytics([{id:'old',kind:'inventory',work_date:'2026-10-01',data:{status
 assert.deepEqual(validateRule({...s,minimum_sheets:'0',target_sheets:'10',enabled:false}),{type:'Comum',color:'Incolor',thickness_mm:6,width_mm:1000,height_mm:2000,minimum_sheets:0,target_sheets:10,enabled:false});
 for(const patch of [{minimum_sheets:-1},{minimum_sheets:1.5},{minimum_sheets:'1,5'},{target_sheets:0,minimum_sheets:1},{target_sheets:1000001},{enabled:'false'}])assert.throws(()=>validateRule({...s,minimum_sheets:0,target_sheets:10,...patch}));
 assert.throws(()=>validateRule({...s,minimum_sheets:null,target_sheets:10}),/./);
+// Catalog spacing/case/NFC differences must not split stock or invalidate a rule.
+const normalizedRows=[box('format-a','sealed',10,2,{type:'Habitat  Neutro',color:'Fumê',warehouse:'Galpão\u00A0 1'}),box('format-b','sealed',5,1,{type:' HABITAT\tNeutro\u200B ',color:'FUME\u0302',warehouse:' GALPÃO  1 '}),rule('format-rule',15,20,{type:'habitat\u00A0neutro',color:'fume\u0302'})];
+const beforeNormalization=JSON.stringify(normalizedRows);
+const normalizedBI=buildAnalytics(normalizedRows,{type:'HABITAT Neutro',color:' Fumê ',warehouse:'galpão 1'});
+assert.equal(normalizedBI.charts.by_type.length,1);assert.equal(normalizedBI.charts.by_type[0].label,'Habitat Neutro');assert.equal(normalizedBI.charts.by_warehouse.length,1);assert.equal(normalizedBI.kpis.useful_sheets,12);assert.equal(normalizedBI.replenishment[0].useful_sheets,12);assert.equal(normalizedBI.replenishment[0].needed_sheets,8);assert.equal(JSON.stringify(normalizedRows),beforeNormalization,'normalization never changes source IDs or rows');
+assert.equal(buildAnalytics(normalizedRows,{color:'Fume'}).kpis.useful_sheets,0,'accents identify different catalog names');
+assert.equal(buildAnalytics(normalizedRows,{type:'HabitatNeutro'}).kpis.useful_sheets,0,'do not fuzzy-join product words');
+assert.equal(buildAnalytics(normalizedRows,{type:'Habitat Neutro Solar'}).replenishment.length,0);
+assert.equal(validateRule({...s,type:' Habitat  Neutro ',color:'Fume\u0302',minimum_sheets:1,target_sheets:2}).type,'Habitat Neutro');
 console.log('PASS: BI quatro séries, estoque útil sem duplicidade, última contagem fechada, reposição global e limites, filtros, histórico sem valores inventados.');

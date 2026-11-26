@@ -1,5 +1,8 @@
 /** Inventory calculations. No financial values or invoice origin are inferred. */
 export const templateHeaders=Object.freeze(['Nota Fiscal','Tipo','Cor','Espessura mm','Largura mm','Altura mm','Chapas','Avarias','Galpão','Link Foto']);
+/** Canonical catalog text: preserve words and accents; normalize only encoding and spacing. */
+export function catalogText(value){return String(value??'').normalize('NFC').replace(/[\u200B\uFEFF]/gu,'').replace(/[\s\p{White_Space}]+/gu,' ').trim();}
+export function catalogKey(value){return catalogText(value).toLocaleLowerCase('pt-BR');}
 const fields=['invoice','type','color','thickness_mm','width_mm','height_mm','sheets','damaged','warehouse','photo_url'];
 const unwrap=value=>value?.data && typeof value.data==='object'?{...value.data,id:value.id??value.data.id}:value||{};
 const round=value=>Math.round((value+Number.EPSILON)*1e6)/1e6;
@@ -18,7 +21,7 @@ function numeric(value,label,{integer=false,min=0,max=100000}={}){
 function text(value,label,max=120){
  if(value&&typeof value==='object'){if('f'in value)fail(`${label}: fórmulas não são aceitas.`);value=value.v;}
  if(value===undefined||value===null)fail(`${label}: preenchimento obrigatório.`);
- value=String(value).trim().normalize('NFC');
+ value=catalogText(value);
  if(!value||value.length>max||/[\u0000-\u001f\u007f]/u.test(value))fail(`${label}: use de 1 a ${max} caracteres válidos.`);
  if(/^[=+@]/.test(value))fail(`${label}: fórmulas não são aceitas.`);
  return value;
@@ -56,7 +59,7 @@ export function parseImport(rows){
  return{items,errors};
 }
 /** Exact glass specification; warehouse and invoice do not identify a glass SKU. */
-export function sku(raw){const s=unwrap(raw);return JSON.stringify([String(s.type??'').trim().normalize('NFC').toLocaleLowerCase('pt-BR'),String(s.color??'').trim().normalize('NFC').toLocaleLowerCase('pt-BR'),Number(s.thickness_mm),Number(s.width_mm),Number(s.height_mm)]);}
+export function sku(raw){const s=unwrap(raw);return JSON.stringify([catalogKey(s.type),catalogKey(s.color),Number(s.thickness_mm),Number(s.width_mm),Number(s.height_mm)]);}
 export function area(raw,quantity=1){const s=unwrap(raw);const width=numeric(s.width_mm,'Largura mm',{min:0.001,max:20000}),height=numeric(s.height_mm,'Altura mm',{min:0.001,max:20000});return round(width*height/1e6*numeric(quantity,'Quantidade',{min:0,max:1000000000}));}
 /** Caller supplies which sealed boxes belong to the selected date/snapshot. */
 export function summarize(boxes=[],loose=[]){

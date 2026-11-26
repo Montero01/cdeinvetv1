@@ -66,12 +66,25 @@ return (select coalesce(jsonb_agg(to_jsonb(t) order by t.created_at,t.id),'[]') 
 end$$;
 create function public.invd_list(p_offset integer default 0,p_limit integer default 500) returns jsonb language sql stable security invoker set search_path='' as $$select invd_private.list(p_offset,p_limit)$$;
 
+-- Comparação de rótulos sem espaços repetidos/invisíveis, preservando acentos e palavras.
+create function invd_private.catalog_text(p text)returns text language sql immutable set search_path=''as $$
+select btrim(regexp_replace(translate(replace(replace(normalize(coalesce(p,''),NFC),chr(8203),''),chr(65279),''),U&'\0085\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000',repeat(' ',19)),'[[:space:]]+',' ','g'))
+$$;
+create function invd_private.catalog_key(category text,p text)returns text language sql immutable set search_path=''as $$
+select case when category='thickness'and replace(invd_private.catalog_text(p),',','.')~'^[0-9]+([.][0-9]+)?$' then trim_scale(replace(invd_private.catalog_text(p),',','.')::numeric)::text else lower(invd_private.catalog_text(p))end
+$$;
+create function invd_private.catalog_value(category text,p text)returns text language sql stable set search_path=''as $$
+select case when category='thickness' then invd_private.catalog_key(category,data->>'value')else invd_private.catalog_text(data->>'value')end from public.inventarydaily_table where kind='catalog'and data->>'category'=category and invd_private.catalog_key(category,data->>'value')=invd_private.catalog_key(category,p)order by created_at,id limit 1
+$$;
+revoke all on function invd_private.catalog_text(text),invd_private.catalog_key(text,text),invd_private.catalog_value(text,text) from public,anon,authenticated;
+create index invd_catalog_normalized on public.inventarydaily_table((data->>'category'),invd_private.catalog_key(data->>'category',data->>'value'))where kind='catalog';
+
 create function invd_private.spec(p jsonb,loose boolean default false) returns jsonb language plpgsql stable set search_path='' as $$
 declare k text;v numeric;r jsonb:='{}';q bigint;d bigint;
 begin
 foreach k in array array['type','color','warehouse'] loop
- if length(trim(coalesce(p->>k,''))) not between 1 and 120 then raise exception 'Informe tipo, cor e galpão (até 120 caracteres).';end if;
- r:=r||jsonb_build_object(k,trim(p->>k));
+ if length(invd_private.catalog_text(p->>k)) not between 1 and 120 then raise exception 'Informe tipo, cor e galpão (até 120 caracteres).';end if;
+ r:=r||jsonb_build_object(k,invd_private.catalog_text(p->>k));
 end loop;
 foreach k in array array['thickness_mm','width_mm','height_mm'] loop
  begin v:=(p->>k)::numeric;exception when others then raise exception 'Dimensão ou espessura inválida.';end;
@@ -115,7 +128,7 @@ select jsonb_build_object(
 $$;
 
 create function invd_private.command(p_action text,p_request_id uuid,p_payload jsonb) returns jsonb language plpgsql security definer set search_path='' as $$
-declare actor public.profiles;session public.inventarydaily_table;box public.inventarydaily_table;prev public.inventarydaily_table;row_id uuid;sid uuid;out jsonb;v jsonb;x jsonb;ids jsonb:='[]';d date;cat text;val text;n integer;qty numeric;existing_id uuid;
+declare actor public.profiles;session public.inventarydaily_table;box public.inventarydaily_table;prev public.inventarydaily_table;row_id uuid;sid uuid;out jsonb;v jsonb;x jsonb;ids jsonb:='[]';d date;cat text;val text;n integer;qty numeric;existing_id uuid;canonical text;
 begin
 if not invd_private.allowed() then raise exception 'Seu perfil não tem acesso ao inventário.' using errcode='42501';end if;
 if p_action in('inventory_delete','box_delete','reorder_rule_save') and not invd_private.manager() then raise exception 'Somente gerência, diretoria e master podem excluir ou gerenciar parâmetros de reposição.' using errcode='42501';end if;
@@ -129,9 +142,9 @@ if prev.id is not null then
 if p_action='reorder_rule_save' then
 v:='{}';
 foreach cat in array array['type','color']loop
- val:=trim(p_payload->>cat);
+ val:=invd_private.catalog_text(p_payload->>cat);
  if val is null or length(val)not between 1 and 120 then raise exception 'Informe o tipo e a cor do vidro.';end if;
- select data->>'value'into val from public.inventarydaily_table where kind='catalog' and data->>'category'=cat and lower(data->>'value')=lower(val);
+ val:=invd_private.catalog_value(cat,val);
  if val is null then raise exception 'Cadastre o tipo e a cor antes de criar a regra.';end if;
  v:=v||jsonb_build_object(cat,val);
 end loop;
@@ -154,7 +167,7 @@ if nullif(p_payload->>'id','')is not null then
  if prev.id is null then raise exception 'Regra não encontrada. Atualize os dados.';end if;
  row_id:=prev.id;
 end if;
-select id into existing_id from public.inventarydaily_table where kind='reorder_rule' and lower(data->>'type')=lower(v->>'type') and lower(data->>'color')=lower(v->>'color')and(data->>'thickness_mm')::numeric=(v->>'thickness_mm')::numeric and(data->>'width_mm')::numeric=(v->>'width_mm')::numeric and(data->>'height_mm')::numeric=(v->>'height_mm')::numeric;
+select id into existing_id from public.inventarydaily_table where kind='reorder_rule' and invd_private.catalog_key('type',data->>'type')=invd_private.catalog_key('type',v->>'type') and invd_private.catalog_key('color',data->>'color')=invd_private.catalog_key('color',v->>'color')and(data->>'thickness_mm')::numeric=(v->>'thickness_mm')::numeric and(data->>'width_mm')::numeric=(v->>'width_mm')::numeric and(data->>'height_mm')::numeric=(v->>'height_mm')::numeric;
 if existing_id is not null and row_id is not null and existing_id<>row_id then raise exception 'Já existe uma regra para este vidro e estas dimensões. Edite a regra existente.';end if;
 if row_id is null and existing_id is not null then row_id:=existing_id;select * into prev from public.inventarydaily_table where id=row_id;end if;
 if row_id is null then
@@ -200,20 +213,22 @@ update public.inventarydaily_table set parent_id=null,data=data||jsonb_build_obj
 delete from public.inventarydaily_table where id=prev.id;
 end if;
 elsif p_action='catalog_add' then
-cat:=p_payload->>'category';val:=trim(p_payload->>'value');
+cat:=p_payload->>'category';val:=invd_private.catalog_text(p_payload->>'value');
 if cat not in('type','color','thickness','warehouse') or cat is null or val is null or length(val) not between 1 and 120 then raise exception 'Categoria ou valor inválido.';end if;
-if cat='thickness' then if val !~ '^[0-9]+([.][0-9]{1,3})?$' or val::numeric<=0 or val::numeric>100 then raise exception 'Espessura inválida.';end if;val:=trim(trailing '.' from trim(trailing '0' from to_char(val::numeric,'FM99990.000')));end if;
-insert into public.inventarydaily_table(kind,data,created_by,created_by_name) values('catalog',jsonb_build_object('category',cat,'value',val),actor.id,actor.full_name) on conflict do nothing returning id into row_id;
-if row_id is null then select id into row_id from public.inventarydaily_table where kind='catalog' and data->>'category'=cat and lower(data->>'value')=lower(val);end if;out:=jsonb_build_object('id',row_id);
+if cat='thickness' then val:=replace(val,',','.');if val !~ '^[0-9]+([.][0-9]{1,3})?$' or val::numeric<=0 or val::numeric>100 then raise exception 'Espessura inválida.';end if;val:=trim(trailing '.' from trim(trailing '0' from to_char(val::numeric,'FM99990.000')));end if;
+select id into row_id from public.inventarydaily_table where kind='catalog'and data->>'category'=cat and invd_private.catalog_key(cat,data->>'value')=invd_private.catalog_key(cat,val)order by created_at,id limit 1;
+if row_id is null then insert into public.inventarydaily_table(kind,data,created_by,created_by_name) values('catalog',jsonb_build_object('category',cat,'value',val),actor.id,actor.full_name)returning id into row_id;end if;out:=jsonb_build_object('id',row_id);
 elsif p_action='box_create' then
 if exists(select 1 from public.inventarydaily_table where kind='inventory' and data->>'status'='active') then raise exception 'Conclua o inventário em andamento antes de registrar entradas.';end if;
 if coalesce(jsonb_typeof(p_payload->'items'),'null')<>'array' or coalesce(jsonb_array_length(p_payload->'items'),0) not between 1 and 500 then raise exception 'Envie de 1 a 500 caixas por importação.';end if;
-for x in select * from jsonb_array_elements(p_payload->'items') loop
+n:=0;for x in select * from jsonb_array_elements(p_payload->'items') loop n:=n+1;
 v:=invd_private.spec(x);row_id:=gen_random_uuid();
 -- Catálogos controlados, inclusive via importação.
 foreach cat in array array['type','color','thickness','warehouse'] loop
  val:=case cat when 'thickness' then v->>'thickness_mm' else v->>cat end;
- if not exists(select 1 from public.inventarydaily_table where kind='catalog' and data->>'category'=cat and lower(data->>'value')=lower(val)) then raise exception 'Cadastre antes: % = %.',cat,val;end if;
+ canonical:=invd_private.catalog_value(cat,val);
+ if canonical is null then raise exception 'Registro %: % "%" não encontrado no cadastro. Confira a aba Cadastros.',n,case cat when 'type'then'Tipo de vidro'when'color'then'Cor'when'thickness'then'Espessura (mm)'else'Galpão/local'end,val;end if;
+ v:=v||jsonb_build_object(case when cat='thickness'then'thickness_mm'else cat end,case when cat='thickness'then to_jsonb(canonical::numeric)else to_jsonb(canonical)end);
 end loop;
 v:=v||jsonb_build_object('code','CDE-'||upper(replace(row_id::text,'-','')));
 insert into public.inventarydaily_table(id,kind,data,created_by,created_by_name) values(row_id,'box',v,actor.id,actor.full_name);ids:=ids||to_jsonb(row_id);end loop;
@@ -239,7 +254,8 @@ if row_id is null then select id into row_id from public.inventarydaily_table wh
 out:=jsonb_build_object('id',row_id,'box_id',box.id);
 elsif p_action='inventory_loose' then
 v:=invd_private.spec(p_payload,true);
-if not(session.data->'warehouses' @> jsonb_build_array(v->>'warehouse'))then raise exception 'Galpão não incluído neste inventário.';end if;
+select invd_private.catalog_text(w.value)into canonical from jsonb_array_elements_text(session.data->'warehouses')w where invd_private.catalog_key('warehouse',w.value)=invd_private.catalog_key('warehouse',v->>'warehouse')limit 1;
+if canonical is null then raise exception 'Galpão não incluído neste inventário.';end if;v:=v||jsonb_build_object('warehouse',canonical);
 insert into public.inventarydaily_table(kind,parent_id,work_date,data,created_by,created_by_name)values('loose',sid,session.work_date,v,actor.id,actor.full_name)returning id into row_id;out:=jsonb_build_object('id',row_id);
 elsif p_action='inventory_loose_remove' then
 select * into prev from public.inventarydaily_table where id=(p_payload->>'id')::uuid;

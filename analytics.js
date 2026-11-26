@@ -1,10 +1,10 @@
 /** Inventory BI: physical stock snapshots, never inferred consumption or sales. */
-import {sku,validateBox} from './utils.js';
+import {sku,validateBox,catalogText,catalogKey} from './utils.js?v=20261126-catalog';
 const data=row=>row?.data??row??{};
-const normalized=value=>String(value??'').trim().normalize('NFC').toLocaleLowerCase('pt-BR');
+const normalized=catalogKey;
 const round=value=>Math.round((value+Number.EPSILON)*1e6)/1e6;
 const numeric=value=>Number.isFinite(Number(value))?Number(value):0;
-const dims=spec=>({type:spec.type,color:spec.color,thickness_mm:Number(spec.thickness_mm),width_mm:Number(spec.width_mm),height_mm:Number(spec.height_mm)});
+const dims=spec=>({type:catalogText(spec.type),color:catalogText(spec.color),thickness_mm:Number(spec.thickness_mm),width_mm:Number(spec.width_mm),height_mm:Number(spec.height_mm)});
 const sheetArea=s=>Number(s.width_mm)*Number(s.height_mm)/1e6;
 const count=value=>{if(value===undefined||value===null||typeof value==='boolean'||(typeof value==='string'&&!value.trim()))throw new Error('Informe o estoque mínimo e o alvo.');if(typeof value==='string'&&!/^\d+$/.test(value.trim()))throw new Error('Use quantidades inteiras sem separador de milhar.');const n=Number(value);if(!Number.isSafeInteger(n)||n<0||n>1000000)throw new Error('Mínimo e alvo devem ser inteiros entre 0 e 1.000.000.');return n;};
 /** Global per-SKU thresholds; target is a stock quantity, never a purchase forecast. */
@@ -24,7 +24,7 @@ function matches(s,filters,{warehouse=true}={}){
 }
 function latestClosed(rows){return rows.filter(r=>r.kind==='inventory'&&r.data?.status==='closed').sort((a,b)=>String(b.work_date??'').localeCompare(String(a.work_date??''))||String(b.created_at??'').localeCompare(String(a.created_at??''))||String(b.id??'').localeCompare(String(a.id??'')));}
 function physicalRows(rows,last){
- return[...rows.filter(r=>r.kind==='box'&&r.data?.status==='sealed').map(r=>({id:r.id,...dims(r.data),warehouse:r.data.warehouse,source:'sealed',quantity:numeric(r.data.sheets),damaged:numeric(r.data.damaged)})),...rows.filter(r=>r.kind==='loose'&&last&&r.parent_id===last.id).map(r=>({id:r.id,...dims(r.data),warehouse:r.data.warehouse,source:'loose',quantity:numeric(r.data.quantity),damaged:numeric(r.data.damaged)}))];
+ return[...rows.filter(r=>r.kind==='box'&&r.data?.status==='sealed').map(r=>({id:r.id,...dims(r.data),warehouse:catalogText(r.data.warehouse),source:'sealed',quantity:numeric(r.data.sheets),damaged:numeric(r.data.damaged)})),...rows.filter(r=>r.kind==='loose'&&last&&r.parent_id===last.id).map(r=>({id:r.id,...dims(r.data),warehouse:catalogText(r.data.warehouse),source:'loose',quantity:numeric(r.data.quantity),damaged:numeric(r.data.damaged)}))];
 }
 function aggregateStock(items){
  const groups=new Map();

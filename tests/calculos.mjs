@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {validateBox,parseImport,area,sku,summarize,reconcile,csv,templateHeaders} from '../utils.js';
+import {validateBox,parseImport,area,sku,summarize,reconcile,csv,templateHeaders,catalogText,catalogKey} from '../utils.js';
 const raw={invoice:'NF 123',type:'Comum',color:'Incolor',thickness_mm:'6,0',width_mm:3210,height_mm:2250,sheets:30,damaged:2,warehouse:'Galpão 1'},box={id:'a',...validateBox(raw),status:'sealed'};
 assert.equal(area(box),7.2225);assert.equal(area(box,30),216.675);
 assert.equal(box.thickness_mm,6);
@@ -42,4 +42,18 @@ assert.equal(summarize([],[loose]).sheets_loose,5);assert.equal(summarize([],[{.
 result=reconcile([{id:'a',data:box}],[],[{id:'l',data:loose}],[{id:'d',data:{box_id:'a',outcome:'opened'}}])[0];assert.equal(result.box_count,1);
 assert.equal(csv([['A','B'],['=1+1','one;two'],['-2','"quoted"']]),'\uFEFF"A";"B"\r\n"\'=1+1";"one;two"\r\n"\'-2";"""quoted"""');
 assert.match(csv([{Tipo:'Comum',Chapas:2},{Tipo:'Laminado',Avarias:1}]),/^\uFEFF"Tipo";"Chapas";"Avarias"/);
+// Catalog identity tolerates formatting differences without guessing product names.
+assert.equal(catalogText(' \uFEFFHabitat\u00A0 \t Neutro\u200B  '),'Habitat Neutro');
+assert.equal(catalogText('Habitat\u0085\u2003\u202FNeutro'),'Habitat Neutro');
+assert.equal(catalogKey('HABITAT  NEUTRO'),catalogKey(' Habitat\u00A0Neutro '));
+assert.equal(catalogText('Fume\u0302'),'Fumê');
+assert.equal(catalogKey('FUME\u0302'),catalogKey('Fumê'));
+assert.notEqual(catalogKey('Fumê'),catalogKey('Fume'));
+assert.notEqual(catalogKey('HabitatNeutro'),catalogKey('Habitat Neutro'));
+assert.notEqual(catalogKey('Habitat Neutro Solar'),catalogKey('Habitat Neutro'));
+const spaced=validateBox({...raw,type:' Habitat  Neutro ',color:' Fume\u0302\u200B ',warehouse:' Galpão\u00A0\t 1\uFEFF '});
+assert.equal(spaced.type,'Habitat Neutro');assert.equal(spaced.color,'Fumê');assert.equal(spaced.warehouse,'Galpão 1');
+assert.equal(sku(spaced),sku({...spaced,type:'HABITAT\u00A0 NEUTRO',color:'fume\u0302'}));
+const importSpaced=parseImport([{...excel,Tipo:'Habitat\u00A0 \tNeutro\u200B',Cor:'Fume\u0302'}]);
+assert.equal(importSpaced.errors.length,0);assert.equal(importSpaced.items[0].type,'Habitat Neutro');assert.equal(importSpaced.items[0].color,'Fumê');
 console.log('PASS: cálculos m² e avarias, importação validada, fórmulas/URLs, conciliação sem origem inventada e CSV seguro.');

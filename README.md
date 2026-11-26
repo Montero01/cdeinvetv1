@@ -87,3 +87,11 @@ Rozana Seixas, Danielle S. Araújo e Kilze K. Krauss receberam autorizações ex
 As permissões incluem cadastros/contagens, parâmetros de reposição, exclusões auditadas e leitura do log. Vitor continua operacional; outros colaboradores não são liberados por setor ou cargo semelhante. Alterações não modificam usuários, senhas, cargos, acessos comerciais ou permissões de outros módulos do PDI. É necessário sair e entrar novamente numa sessão já aberta para carregar os controles gerenciais na interface.
 
 `sql/pilot-access.sql` registra a implantação; `tests/pilot-access.sql` validou as quatro contas, preservação dos cargos, acesso operacional do Vitor, bloqueio de outro colaborador, leitura privada da ACL e autorização no servidor. Não houve exclusão ou alteração de dados operacionais durante a verificação.
+
+## Comparação de cadastros na importação
+
+A comparação de tipo, cor, galpão e regras de reposição normaliza a representação Unicode (NFC), espaços repetidos, espaços não separáveis de planilhas, tabulações e marcas invisíveis. Diferenças de maiúsculas/minúsculas não criam outro item. Exemplo: o cadastro legado `Habitat  Neutro` (dois espaços) é reconhecido ao importar `Habitat Neutro` (um espaço). Acentos e palavras diferentes continuam distintos; não se faz aproximação entre nomes de mercadorias. Espessuras numericamente equivalentes, como `2` e `02.0`, usam a mesma chave.
+
+Os cadastros históricos e IDs foram preservados. A interface apresenta os nomes com espaçamento consistente; novos registros usam a grafia canônica do cadastro. Tentar adicionar uma opção equivalente retorna o cadastro existente. Para tipos realmente ausentes, a mensagem agora usa o nome do campo em português e indica o número do registro com problema. Importações continuam atômicas.
+
+`sql/catalog-normalization.sql` e `sql/catalog-unicode-space.sql` registram a correção; `tests/catalog-normalization.sql` reproduz a entrada com o cadastro real de dois espaços, testa formatos de planilha, ausência de duplicação, rótulos canônicos, idempotência, erro de lote e galpões de snapshots antigos. O teste roda com rollback e não grava entradas fictícias.
