@@ -69,3 +69,11 @@ Em **Cadastros → Parâmetros de reposição**, gerência/diretoria/master defi
 A regra considera **todos os galpões juntos**. O filtro visual de galpão não reduz a base usada para comparar o mínimo global; filtros de tipo/cor/espessura recortam as regras exibidas. A tela explicita essa diferença. Havendo conferência ativa ou nenhuma conferência concluída, a sugestão é provisória; a data da última conferência fica visível para avaliar a atualidade das avulsas.
 
 Validação: `tests/analytics.mjs` verifica fórmulas, limiares, avarias, estoque sem duplicidade e filtros. `tests/charts.mjs` verifica os quatro SVGs, dados vazios/zero, texto seguro e lacunas históricas. `tests/reorder-rules.sql` verifica autorização, limites, catálogo, unicidade, edição/inativação, auditoria e idempotência em uma transação com rollback.
+
+## Data de entrada e foto do item
+
+A etiqueta de 100 × 60 mm inclui **Entrada: DD/MM/AAAA**. A fonte é `created_at`, o horário original de registro da caixa no estoque, apresentado no fuso de Manaus. Não utiliza a data do inventário nem a data da impressão. O mesmo campo é exibido na página do item. As informações da etiqueta passaram para fonte de 9 pt (descrição superior de 8,5 pt), preservando as margens de leitura do QR e das barras. A prévia ajusta a escala à largura disponível sem mudar o tamanho físico da impressão.
+
+Na página da caixa, **Visualizar foto** abre um modal no próprio aplicativo. Links HTTPS diretos são exibidos como imagem; links de arquivos do Google Drive são normalizados para o visualizador `/preview`, preservando `resourcekey` quando presente. O módulo não torna arquivos públicos nem altera permissões: o arquivo precisa permitir a visualização pelo usuário. Links de pastas ou inseguros são recusados. Se o provedor não permitir embutir a imagem ou exigir acesso adicional, a tela informa a limitação e oferece **Abrir original** como alternativa manual. Ao fechar, o carregamento da imagem/frame é interrompido e o foco volta ao botão de origem.
+
+`tests/photos.mjs` cobre datas, limites de dia e fontes HTTPS/Drive; `tests/qa.mjs` cobre data compartilhada na prévia/impressão, viewer, erros e fechamento. Os testes de interface usam DOM simulado; impressora física e imagens privadas de provedores externos ainda dependem do equipamento e das permissões reais.

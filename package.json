@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/calculos.mjs && node tests/analytics.mjs && node tests/charts.mjs && node tests/qa.mjs",
-    "check": "node --check app.js && node --check utils.js && node --check analytics.js && node --check charts.js"
+    "test": "node tests/calculos.mjs && node tests/analytics.mjs && node tests/charts.mjs && node tests/photos.mjs && node tests/qa.mjs",
+    "check": "node --check app.js && node --check utils.js && node --check analytics.js && node --check charts.js && node --check photos.js"
   },
   "devDependencies": {
     "linkedom": "0.18.12"

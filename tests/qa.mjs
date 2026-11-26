@@ -4,10 +4,13 @@ import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
 import * as Utils from '../utils.js';
 import * as Analytics from '../analytics.js';
+import * as Photos from '../photos.js';
 const linkedomPath=process.env.CDE_QA_LINKEDOM||'/workspace/work/academy-icons-qa/node_modules/linkedom/esm/index.js';
 const {parseHTML}=await import('linkedom').catch(()=>import(linkedomPath));
 const base=new URL('../',import.meta.url),html=fs.readFileSync(new URL('index.html',base),'utf8');
 const appSource=fs.readFileSync(new URL('app.js',base),'utf8').replace("import * as U from './utils.js';","const U=__utils;").replace(/import \{buildAnalytics,validateRule\} from ['"][^'"]+['"];?/,"const {buildAnalytics,validateRule}=__analytics;").replace(/import \{renderInventoryChart\} from ['"][^'"]+['"];?/,"const {renderInventoryChart}=__charts;");
+const photosImport=/import \{photoSource,formatEntryDate\} from ['"][^'"]+['"];?/;
+const runnableSource=appSource.replace(photosImport,'const {photoSource,formatEntryDate}=__photos;');
 const chartsSource=fs.readFileSync(new URL('charts.js',base),'utf8').replaceAll('export function ','function ');
 const flush=async()=>{for(let n=0;n<15;n++)await new Promise(r=>setTimeout(r,0));};
 const sample={invoice:'NF 123',type:'Comum',color:'Incolor',thickness_mm:6,width_mm:2000,height_mm:3000,sheets:20,damaged:1,warehouse:'Galpão 1',status:'sealed'};
@@ -43,8 +46,8 @@ async function setup({allowed=true,can_manage=true,loggedIn=true,hash='',records
  const QR=function(host,opts){labels.push({kind:'QR',opts});const c=document.createElement('canvas');c.toDataURL=()=> 'data:image/png;base64,dGVzdA==';host.append(c);};QR.CorrectLevel={M:1};
  const barcode=(host,text,opts)=>{labels.push({kind:'Code128',text,opts});host.setAttribute('data-value',text);};
  const ZXingBrowser={BrowserMultiFormatReader:class{decodeFromVideoDevice(device,video,callback){cameraControls={stop(){stops++;}};this.callback=callback;listeners.camera=callback;return Promise.resolve(cameraControls);}}};
- const locationApi=loc;const context=vm.createContext({window,document,Node:window.Node,HTMLElement:window.HTMLElement,Event:window.Event,URL,Blob,Intl,Date,crypto:webcrypto,location:locationApi,localStorage:storageApi,supabase:window.supabase,QRCode:QR,JsBarcode:barcode,ZXingBrowser,navigator:{vibrate(){}},XLSX:xlsx,print(){},console,__utils:Utils,__analytics:Analytics,setTimeout:fn=>setTimeout(fn,0),clearTimeout});window.QRCode=QR;window.JsBarcode=barcode;window.ZXingBrowser=ZXingBrowser;window.open=()=>{const p=parseHTML('<html><head></head><body></body></html>').window;const w={document:p.document,focus(){},print(){w.printed=true;}};printWindows.push(w);return w;};
- vm.runInContext('globalThis.__charts=(()=>{'+chartsSource+';return {renderInventoryChart};})();',context);vm.runInContext(appSource,context);await flush();
+ const locationApi=loc;const context=vm.createContext({window,document,Node:window.Node,HTMLElement:window.HTMLElement,Event:window.Event,URL,Blob,Intl,Date,crypto:webcrypto,location:locationApi,localStorage:storageApi,supabase:window.supabase,QRCode:QR,JsBarcode:barcode,ZXingBrowser,navigator:{vibrate(){}},XLSX:xlsx,print(){},console,__utils:Utils,__analytics:Analytics,__photos:Photos,setTimeout:fn=>setTimeout(fn,0),clearTimeout});window.QRCode=QR;window.JsBarcode=barcode;window.ZXingBrowser=ZXingBrowser;window.open=()=>{const p=parseHTML('<html><head></head><body></body></html>').window;const w={document:p.document,focus(){},print(){w.printed=true;}};printWindows.push(w);return w;};
+ vm.runInContext('globalThis.__charts=(()=>{'+chartsSource+';return {renderInventoryChart};})();',context);vm.runInContext(runnableSource,context);await flush();
  const main=document.getElementById('main-content'),modal=()=>document.querySelector('.app-modal');
  async function click(text,host=main){const b=[...host.querySelectorAll('button')].find(n=>n.textContent===text);assert(b,'Missing button '+text);b.click();await flush();return b;}
  async function route(value){loc.hash='#'+value;window.dispatchEvent(new window.Event('hashchange'));await flush();}
@@ -92,6 +95,24 @@ await manager.click('× Excluir inventário');manager.set('reason','Inventário 
 await manager.route('item='+IDs[1]);await manager.click('Imprimir etiqueta');assert.equal(manager.printWindows.length,1);const printed=manager.printWindows[0];assert.equal(printed.document.body.className,'label-print');assert.equal(printed.document.body.children.length,1);assert(printed.document.querySelector('.label-panel .label-qr img'));assert(printed.document.querySelector('.label-panel .label-barcode svg'));assert.equal(printed.document.querySelector('canvas'),null);
 const stylesheet=printed.document.querySelector('link[rel=stylesheet]');assert(stylesheet);assert.match(stylesheet.href,/^https:\/\/example\.test\/cdeinvetv1\/style\.css/);printed.document.querySelectorAll('img').forEach(img=>Object.defineProperty(img,'complete',{configurable:true,value:true}));await stylesheet.onload();await flush();assert.equal(printed.printed,true,'printing starts after the physical label stylesheet is ready');
 const css=fs.readFileSync(new URL('style.css',base),'utf8');assert.match(css,/@page\s*\{\s*size:\s*100mm\s+60mm\s*;\s*margin:\s*0\s*;/);assert(!/size:\s*A4/i.test(css));assert.match(css,/body\.label-print \.label-panel\s*\{[^}]*width:\s*100mm[^}]*height:\s*60mm/s);
+// Label entry date comes from created_at in Manaus, shared by preview and printing.
+const photoBox={...boxes[0],created_at:'2026-11-26T02:30:00Z',data:{...boxes[0].data,photo_url:'https://images.example.test/item.jpg'}};
+const photoApp=await setup({hash:'#item='+IDs[0],records:[...catalogs,photoBox]});
+assert.equal(photoApp.main.querySelector('.label-entry-date').textContent,'Entrada: 25/11/2026');
+assert.match(photoApp.main.querySelector('.item-specs').textContent,/25\/11\/2026/);
+await photoApp.click('Imprimir etiqueta');const photoPrint=photoApp.printWindows.at(-1);assert.equal(photoPrint.document.querySelector('.label-entry-date').textContent,'Entrada: 25/11/2026');
+const photoButton=[...photoApp.main.querySelectorAll('button')].find(b=>b.textContent==='Visualizar foto');photoButton.focus();
+await photoApp.click('Visualizar foto');assert(photoApp.modal().classList.contains('photo-modal'));const img=photoApp.modal().querySelector('.photo-image');assert(img);assert.equal(img.src,'https://images.example.test/item.jpg');assert.equal(img.referrerPolicy,'no-referrer');assert(!photoApp.modal().querySelector('iframe'));
+img.dispatchEvent(new photoApp.window.Event('load'));assert.equal(photoApp.modal().querySelector('.photo-feedback').textContent,'');
+assert.equal(photoApp.printWindows.length,1,'opening photo does not create an external window');
+const escape=new photoApp.window.Event('keydown');Object.defineProperty(escape,'key',{value:'Escape'});photoApp.document.dispatchEvent(escape);await flush();assert.equal(photoApp.modal(),null);assert.equal(img.getAttribute('src'),null,'photo request cleaned on close');assert.equal(photoApp.document.activeElement,photoButton,'focus returned to photo button');
+await photoApp.click('Visualizar foto');const badImg=photoApp.modal().querySelector('.photo-image');badImg.dispatchEvent(new photoApp.window.Event('error'));assert.equal(badImg.hidden,true);assert.match(photoApp.modal().textContent,/Não foi possível exibir/);assert(photoApp.modal().querySelector('a[target=_blank]'));await photoApp.click('Fechar',photoApp.modal());
+const driveBox={...photoBox,data:{...photoBox.data,photo_url:'https://drive.google.com/file/d/123_Drive-file/view?resourcekey=0-key'}};
+const driveApp=await setup({hash:'#item='+IDs[0],records:[...catalogs,driveBox]});await driveApp.click('Visualizar foto');const frame=driveApp.modal().querySelector('iframe');assert(frame);assert.equal(frame.src,'https://drive.google.com/file/d/123_Drive-file/preview?resourcekey=0-key');assert.equal(frame.getAttribute('sandbox'),'allow-scripts allow-same-origin');assert.equal(frame.referrerPolicy,'no-referrer');assert.match(frame.title,/Foto do item/);assert.match(driveApp.modal().textContent,/permissões/);assert.equal(driveApp.printWindows.length,0);await driveApp.click('Fechar',driveApp.modal());assert.equal(frame.src,'about:blank');
+const unsafeApp=await setup({hash:'#item='+IDs[0],records:[{...photoBox,data:{...photoBox.data,photo_url:'javascript:alert(1)'}}]});await unsafeApp.click('Visualizar foto');assert.equal(unsafeApp.modal(),null);assert.match(unsafeApp.document.getElementById('toast').textContent,/HTTPS/);assert.equal(unsafeApp.printWindows.length,0);
+const withoutPhoto=await setup({hash:'#item='+IDs[0],records:[boxes[0]]});assert(![...withoutPhoto.main.querySelectorAll('button')].some(n=>n.textContent==='Visualizar foto'));
+assert.match(css,/body\.label-print \.label-meta\s*\{[^}]*font-size:\s*9pt/s);assert.match(css,/\.label-heading h3\s*\{[^}]*font-size:\s*9pt/s);assert.match(css,/\.label-heading p\s*\{[^}]*font-size:\s*8\.5pt/s);assert.match(css,/body\.label-print \.label-qr[^}]*width:\s*28mm[^}]*padding:\s*3mm/s);assert.match(css,/body\.label-print \.label-panel[^}]*transform:\s*none/s);
+console.log('PASS: entry date from created_at in Manaus on preview/print, larger label fonts, safe internal photo and Drive preview, load/error feedback, Escape/focus/cleanup, no automatic external navigation.');
 // Dashboard uses real analytics and SVG rendering; RPCs below are still simulated.
 const snapGroup={...sample,sheets:20,damaged:1,m2:120};
 const invOld={id:'old-closed',kind:'inventory',work_date:'2026-11-24',created_at:'2026-11-24T12:00:00Z',data:{status:'closed',summary:{groups:[snapGroup]}}};
