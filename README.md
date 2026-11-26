@@ -4,7 +4,7 @@ Piloto independente do PDI, com o mesmo Supabase Auth e os perfis reais de `prof
 
 ## Acesso e início
 
-Use o e-mail e senha já cadastrados no PDI. A sessão deste aplicativo é separada, sem copiar senhas ou tokens na URL. O piloto libera Vitor Amaral e perfis de gerência, diretoria ou master. Não altera os acessos dos módulos existentes do PDI. A configuração inicial de Vitor é vinculada ao ID do perfil, não ao nome digitado no login. Não há estoque de demonstração na base.
+Use o e-mail e senha já cadastrados no PDI. A sessão deste aplicativo é separada, sem copiar senhas ou tokens na URL. O piloto libera Vitor Amaral como operador; perfis de gerência, diretoria, master e o cargo Coordenador de Estoque têm funções gerenciais no Inventário. Rozana Seixas, Danielle S. Araújo e Kilze K. Krauss possuem liberação gerencial explícita para o período de testes. Não altera os acessos dos módulos existentes do PDI. A configuração inicial de Vitor é vinculada ao ID do perfil, não ao nome digitado no login. Não há estoque de demonstração na base.
 
 1. Em **Cadastros**, registre os galpões e, se necessário, novos tipos, cores e espessuras.
 2. Em **Entradas**, receba cada caixa ou baixe o modelo XLSX e importe um lote. Uma linha corresponde a uma caixa, não a uma nota fiscal. Cada caixa recebe identificação própria, página individual e etiquetas QR/Code128 imprimíveis.
@@ -77,3 +77,13 @@ A etiqueta de 100 × 60 mm inclui **Entrada: DD/MM/AAAA**. A fonte é `created_a
 Na página da caixa, **Visualizar foto** abre um modal no próprio aplicativo. Links HTTPS diretos são exibidos como imagem; links de arquivos do Google Drive são normalizados para o visualizador `/preview`, preservando `resourcekey` quando presente. O módulo não torna arquivos públicos nem altera permissões: o arquivo precisa permitir a visualização pelo usuário. Links de pastas ou inseguros são recusados. Se o provedor não permitir embutir a imagem ou exigir acesso adicional, a tela informa a limitação e oferece **Abrir original** como alternativa manual. Ao fechar, o carregamento da imagem/frame é interrompido e o foco volta ao botão de origem.
 
 `tests/photos.mjs` cobre datas, limites de dia e fontes HTTPS/Drive; `tests/qa.mjs` cobre data compartilhada na prévia/impressão, viewer, erros e fechamento. Os testes de interface usam DOM simulado; impressora física e imagens privadas de provedores externos ainda dependem do equipamento e das permissões reais.
+
+## Autorizações do piloto
+
+O nível gerencial do **Inventário** também se aplica ao cargo de `profiles.position` igual a Coordenador de Estoque (inclui formas Coordenadora e Coordenador(a), com espaços e capitalização normalizados). Jackson aparece na base como Jackson F. Maia, supervisor e Coordenador de Estoque. A permissão considera o cargo administrado no perfil; não promove seu `profiles.role`.
+
+Rozana Seixas, Danielle S. Araújo e Kilze K. Krauss receberam autorizações explícitas na própria `inventarydaily_table`, vinculadas aos IDs reais de seus perfis: `kind=access`, `enabled=true`, `permission=manager`, `scope=pilot`. Danielle e Kilze já herdavam permissões gerenciais dos cargos e do acesso master. As concessões foram auditadas com autor e horário. Não há data de encerramento de testes definida; as liberações ficam identificadas para revogação quando o diretor encerrar essa etapa, sem uma expiração arbitrária.
+
+As permissões incluem cadastros/contagens, parâmetros de reposição, exclusões auditadas e leitura do log. Vitor continua operacional; outros colaboradores não são liberados por setor ou cargo semelhante. Alterações não modificam usuários, senhas, cargos, acessos comerciais ou permissões de outros módulos do PDI. É necessário sair e entrar novamente numa sessão já aberta para carregar os controles gerenciais na interface.
+
+`sql/pilot-access.sql` registra a implantação; `tests/pilot-access.sql` validou as quatro contas, preservação dos cargos, acesso operacional do Vitor, bloqueio de outro colaborador, leitura privada da ACL e autorização no servidor. Não houve exclusão ou alteração de dados operacionais durante a verificação.

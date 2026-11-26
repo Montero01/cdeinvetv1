@@ -28,7 +28,13 @@ alter table public.inventarydaily_table enable row level security;
 revoke all on public.inventarydaily_table from anon,authenticated;
 
 create function invd_private.manager() returns boolean language sql stable security definer set search_path='' as $$
-select exists(select 1 from public.profiles p where p.id=(select auth.uid()) and (p.is_master is true or lower(p.role) in('gerente','gerencia','manager','diretor','diretoria','director','master','admin')))
+select exists(
+ select 1 from public.profiles p where p.id=(select auth.uid()) and (
+  p.is_master is true
+  or lower(p.role)in('gerente','gerencia','manager','diretor','diretoria','director','master','admin')
+  or lower(regexp_replace(trim(coalesce(p.position,'')),'\s+',' ','g'))in('coordenador de estoque','coordenadora de estoque','coordenador(a) de estoque')
+  or exists(select 1 from public.inventarydaily_table a where a.kind='access'and a.data->>'user_id'=p.id::text and a.data->>'enabled'='true'and a.data->>'permission'='manager')
+ ))
 $$;
 create function invd_private.allowed() returns boolean language sql stable security definer set search_path='' as $$
 select (select auth.uid()) is not null and (invd_private.manager() or exists(select 1 from public.inventarydaily_table a join public.profiles p on p.id=(select auth.uid()) where a.kind='access' and a.data->>'user_id'=p.id::text and a.data->>'enabled'='true'))
