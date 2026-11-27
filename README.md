@@ -112,6 +112,7 @@ Ao iniciar a contagem, a seleção de **um ou mais locais é obrigatória**. G1 
 
 Na aba **Movimentações**, os usuários autorizados do inventário podem:
 
+- **Caixa para avulsas:** selecionar uma caixa fechada e informar o motivo da abertura. Todo o seu saldo, incluindo as avarias, passa para avulsas no mesmo local. O código e os dados de entrada da caixa continuam no histórico; a caixa aberta deixa de contar no estoque fechado. Também é possível abrir a caixa pela página do item.
 - **Agrupar avulsas:** escolher vidro/local, quantidade, avarias incluídas e um código novo. O saldo avulso diminui e uma caixa fechada com o mesmo quantitativo é criada. A quantidade global é conservada. Não se presume uma nota fiscal de origem; o item informa agrupamento e NF não identificada.
 - **Baixa manual:** retirar chapas de uma caixa fechada ou do saldo avulso. A baixa pode ser parcial; a caixa sem saldo passa a `depleted` e deixa de contar como estoque disponível. A quantidade avariada retirada também deve respeitar o saldo.
 - **Transferir:** mover a caixa inteira (mantendo ID/código) ou uma quantidade de avulsas para outro local. A origem diminui e o destino aumenta, sem criar chapas.
@@ -119,6 +120,18 @@ Na aba **Movimentações**, os usuários autorizados do inventário podem:
 Todas exigem motivo, identificação do autor, validação de saldo no servidor e repetição segura por request ID. O saldo de chapas boas e avariadas é conferido separadamente. Operações são registradas em `inventarydaily_table` com `kind=stock_move`; não há novas tabelas ou bancos. Caixas com movimentação não podem ser apagadas por exclusão de cadastro; a baixa é o caminho para retirar o saldo mantendo o histórico.
 
 O estoque atual usa caixas com quantidade/local atualizados e avulsas da última contagem de cada local mais seus débitos/créditos posteriores. Agrupamento desconta avulsas e cria caixa apenas uma vez; transferências e baixas de caixa não são descontadas outra vez na apuração. A nova contagem de um local substitui sua base anterior. Snapshots das caixas e resumos preservam os valores das conferências antigas mesmo quando depois ocorre transferência ou baixa.
+
+A abertura manual credita as chapas avulsas uma única vez. Repetir a mesma requisição retorna o resultado já gravado; outra requisição para uma caixa já aberta é recusada. A quantidade e as avarias vêm do saldo da caixa no servidor. A próxima conferência concluída no mesmo local absorve essa abertura sem duplicar as chapas. Não é permitido abrir caixas de um local com inventário ativo.
+
+## Exportação do estoque e códigos na interface
+
+Na **Visão geral**, em **Itens** e em **Movimentações**, **Exportar resumo CSV** gera uma linha por combinação de vidro, cor, espessura, dimensões e local. **Exportar itens CSV** detalha cada caixa fechada e os saldos avulsos por combinação/local. Ambos mostram quantidade de caixas, chapas em caixa, chapas avulsas, total de chapas, avarias e área física em m². A área e as chapas totais incluem avarias; estas aparecem em uma coluna própria.
+
+As exportações consultam o estoque atual de todos os locais autorizados antes de gerar o arquivo; não se limitam às linhas visíveis ou ao filtro da página. Caixas abertas, não localizadas ou sem saldo e contagens avulsas antigas não são somadas como estoque disponível. O CSV usa UTF-8 com BOM e ponto e vírgula para abertura no Excel, protegendo campos de texto contra execução como fórmulas.
+
+Os códigos aparecem compactos nas listas e seletores, por exemplo **CDE-088D53…**, com fonte menor. O código completo permanece no título do elemento e no campo expansível **Código completo** da página do item. IDs, links, pesquisas, QR, código de barras e CSV continuam utilizando o identificador integral.
+
+`sql/box-to-loose.sql` registra a implantação da abertura manual. `tests/box-to-loose.sql` verifica operador, conservação de saldo/avarias, autoria, auditoria, reenvio, reagrupar/transferir/baixar, contagens por local e bloqueio durante conferência, em uma transação com rollback. Os testes de BI e DOM verificam as exportações e a abreviação somente visual dos códigos.
 
 ## Dispersão e médias entre contagens
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import{buildAnalytics,validateRule,currentStock,currentPhysicalRows}from'../analytics.js';
+import{buildAnalytics,validateRule,currentStock,currentPhysicalRows,stockItemRows,stockSummaryRows}from'../analytics.js';
 const s={type:'Comum',color:'Incolor',thickness_mm:6,width_mm:1000,height_mm:2000,warehouse:'Galpão 1'};
 const box=(id,status,sheets=10,damaged=2,extra={})=>({id,kind:'box',data:{...s,status,sheets,damaged,...extra}});
 const loose=(id,parent,quantity=5,damaged=1,extra={})=>({id,kind:'loose',parent_id:parent,data:{...s,quantity,damaged,...extra}});
@@ -114,3 +114,28 @@ assert.equal(buildAnalytics([prev,{...next,work_date:prev.work_date}]).charts.va
 const distributions=buildAnalytics([box('d1','sealed',10,2),box('d2','sealed',5,1,{color:' INCOLOR ',thickness_mm:8}),box('d3','sealed',3,0,{color:'Verde',thickness_mm:6})]);
 assert.equal(distributions.charts.by_color.find(r=>r.label==='Incolor').useful_sheets,12);assert.equal(distributions.charts.by_color.find(r=>r.label==='Incolor').value,24);assert.deepEqual(distributions.charts.by_thickness.map(r=>[r.label,r.useful_sheets]),[['6 mm',11],['8 mm',4]]);
 console.log('PASS: escopos independentes, ledger avulso/caixa sem dupla baixa, quantidades úteis por cor/espessura, variação física ajustada e médias observadas.');
+
+// Manual unpack moves the whole sealed box into loose without creating or losing stock.
+const unpackedBox=box('unpack-box','opened',8,2,{code:'CDE-FULL-UNTRUNCATED-0123456789'});
+const unpack=move('unpack-once','unpack','box',8,2,G1,G1,'2026-11-22T13:00:00Z',{box_id:'unpack-box'});
+const unpackStock=currentStock([unpackedBox,unpack]);assert.equal(unpackStock.boxes.length,0);assert.equal(unpackStock.loose[0].data.quantity,8);assert.equal(unpackStock.loose[0].data.damaged,2);
+assert.equal(buildAnalytics([unpackedBox,unpack]).kpis.useful_sheets,6);assert.equal(buildAnalytics([unpackedBox,unpack]).kpis.physical_sheets,8);
+assert.equal(currentStock([unpackedBox,unpack,unpack]).loose[0].data.quantity,8,'duplicate payload row ID is still one ledger event');
+const afterUnpackBaseline=[unpackedBox,unpack,scopedInv('after-unpack','2026-11-23',[G1]),loose('after-unpack-loose','after-unpack',8,2)];assert.equal(currentStock(afterUnpackBaseline).loose[0].data.quantity,8,'later local baseline absorbs prior unpack credit');
+assert.equal(currentStock([unpackedBox,unpack,scopedInv('other-place','2026-11-23',[G2])]).loose[0].data.quantity,8,'another warehouse baseline must not erase unpacked loose balance');
+// Unpack then regroup with a new code, transfer a subset and write off a damaged sheet.
+const regroup=move('regroup','repack','loose',5,1,G1,null,'2026-11-22T14:00:00Z',{created_box_id:'new-box'}),regroupedBox=box('new-box','sealed',5,1,{code:'CDE-NEW-CODE-UNTRUNCATED-ABCDEFGHIJ',source:'repack'});
+const followingTransfer=move('after-unpack-transfer','transfer','loose',2,0,G1,G2,'2026-11-22T15:00:00Z');
+const followingWriteoff=move('after-unpack-writeoff','writeoff','loose',1,1,G2,null,'2026-11-22T16:00:00Z');
+// Keep the damaged writeoff in its actual warehouse (the remaining damaged source sheet).
+followingWriteoff.data.from_warehouse=G1;
+const unpackFlow=[unpackedBox,unpack,regroup,regroupedBox,followingTransfer,followingWriteoff];
+const flow=buildAnalytics(unpackFlow);assert.equal(flow.kpis.physical_sheets,7);assert.equal(flow.kpis.damaged_sheets,1);assert.equal(flow.kpis.useful_sheets,6);assert.equal(flow.kpis.sealed_useful_sheets,4);assert.equal(flow.kpis.loose_useful_sheets,2);
+// Format conversion is not external receipt, transfer or writeoff in variation.
+const neutral=buildAnalytics([scopedInv('nu-before','2026-11-22',[G1],[sg(G1,8,2)]),scopedInv('nu-after','2026-11-23',[G1],[sg(G1,8,2)]),unpackedBox,unpack]);assert.equal(neutral.charts.variation[0].entries_sheets,0);assert.equal(neutral.charts.variation[0].confirmed_manual_sheets,0);assert.equal(neutral.charts.variation[0].delta_sheets,0);
+// Both export variants describe only the live physical stock, keeping full codes.
+const individual=stockItemRows([...unpackFlow,box('missing-export','missing',99,0),box('depleted-export','depleted',0,0)]);assert.equal(individual.length,3);assert.equal(individual[1][0],'CDE-NEW-CODE-UNTRUNCATED-ABCDEFGHIJ');assert.equal(individual.some(r=>r[0]==='CDE-FULL-UNTRUNCATED-0123456789'),false);
+assert.equal(individual.slice(1).reduce((n,r)=>n+r[12],0),7);assert.equal(individual.slice(1).reduce((n,r)=>n+r[13],0),1);assert.equal(individual.slice(1).reduce((n,r)=>n+r[14],0),14);
+const summarized=stockSummaryRows(unpackFlow);assert.equal(summarized.slice(1).reduce((n,r)=>n+r[9],0),1);assert.equal(summarized.slice(1).reduce((n,r)=>n+r[12],0),7);assert.equal(summarized.slice(1).reduce((n,r)=>n+r[13],0),1);assert.equal(summarized.slice(1).reduce((n,r)=>n+r[14],0),14);
+assert.equal(stockItemRows([]).length,1);assert.equal(stockSummaryRows([]).length,1);
+console.log('PASS: abertura manual neutra, evento único, absorção por galpão e exportações físicas com códigos completos.');

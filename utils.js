@@ -101,3 +101,9 @@ export function csv(rows){
  function cell(value){let s=String(value??'');if(/^[\s]*[=+\-@\t\r]/u.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';}
  return'\uFEFF'+table.map(row=>row.map(cell).join(';')).join('\r\n');
 }
+
+/** Compact display only. Full input must remain the stored/scanned/exported identity. */
+export function shortCode(value,max=10){
+ const chars=[...String(value??'')],limit=Number.isInteger(max)&&max>=0?max:10;
+ return chars.length>limit?chars.slice(0,limit).join('')+'…':chars.join('');
+}

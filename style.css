@@ -452,6 +452,12 @@ fieldset.location-selection { grid-template-columns: minmax(0, 1fr); padding: 12
 .stock-movement-list { min-width: 0; }
 .stock-movement-list .row-actions { gap: 8px; }
 .stock-movement-list .row-actions .button { flex: 0 1 auto; width: auto; padding: 8px 12px; min-height: 40px; font-size: .78rem; }
+.compact-code, .item-link { display: inline-block; min-width: 0; max-width: 100%; font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: .8rem; line-height: 1.55; letter-spacing: .01em; overflow-wrap: anywhere; vertical-align: middle; }
+.code-full { min-width: 0; max-width: 100%; color: var(--muted); font-size: .76rem; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; }
+.code-full > summary { min-height: 40px; padding-top: 10px; padding-bottom: 10px; font-size: .76rem; font-weight: 600; color: var(--muted); }
+.code-full > p, .code-full > code { display: block; max-width: 100%; padding: 10px 12px; margin: 0; font-size: .76rem; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; }
+.unpack-controls, .unpack-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.unpack-controls > .button:not(.export), .unpack-actions > .button:not(.export), .unpack-form .form-actions > .button:not(.export) { width: auto; max-width: 100%; min-width: 0; min-height: 40px; padding: 9px 14px; font-size: .81rem; line-height: 1.4; align-self: start; justify-self: start; flex: 0 1 auto; }
 .scan-feedback { display: block; width: 100%; padding: 14px 16px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-alt); color: var(--text); font-size: .84rem; line-height: 1.65; margin: 14px 0; overflow-wrap: anywhere; }
 .scan-feedback:empty { display: none; }
 .scan-feedback.success { border-color: color-mix(in srgb, var(--success) 35%, transparent); border-left: 3px solid var(--success); color: var(--success); background: var(--success-tint); }
@@ -562,6 +568,7 @@ fieldset.location-selection { grid-template-columns: minmax(0, 1fr); padding: 12
   .chart-group-control label, .overview-group-control label { flex-basis: 100%; }
   .chart-group-control select, .overview-group-control select { width: 100%; min-height: 44px; font-size: .87rem; }
   .stock-movement-form .button, .stock-movement-actions .button, .stock-movement-list .row-actions .button { min-height: 44px; }
+  .unpack-controls > .button:not(.export), .unpack-actions > .button:not(.export), .unpack-form .form-actions > .button:not(.export), .code-full > summary { min-height: 44px; }
   .scan-feedback { padding: 13px 14px; }
   .location-selection, .warehouse-select-list { grid-template-columns: minmax(0, 1fr); }
   .item-label { padding: 18px; }

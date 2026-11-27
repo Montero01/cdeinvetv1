@@ -1,5 +1,5 @@
 /** Inventory BI: physical stock snapshots, never inferred consumption or sales. */
-import {sku,validateBox,catalogText,catalogKey} from './utils.js?v=20261126-catalog';
+import {sku,validateBox,catalogText,catalogKey} from './utils.js?v=20261127-avulsas-export';
 const data=row=>row?.data??row??{};
 const normalized=catalogKey;
 const round=value=>Math.round((value+Number.EPSILON)*1e6)/1e6;
@@ -22,6 +22,7 @@ function matches(s,filters,{warehouse=true}={}){
  if(warehouse&&filters.warehouse!==undefined&&filters.warehouse!==''&&normalized(s.warehouse)!==normalized(filters.warehouse))return false;
  return true;
 }
+function stockMoves(rows){const seen=new Set();return rows.filter(row=>{if(row.kind!=='stock_move')return false;if(!row.id)return true;if(seen.has(row.id))return false;seen.add(row.id);return true;});}
 function closedSort(a,b){return String(b.work_date??'').localeCompare(String(a.work_date??''))||String(b.data?.closed_at??b.updated_at??b.created_at??'').localeCompare(String(a.data?.closed_at??a.updated_at??a.created_at??''))||String(b.id??'').localeCompare(String(a.id??''));}
 function latestClosed(rows){return rows.filter(r=>r.kind==='inventory'&&r.data?.status==='closed').sort(closedSort);}
 function inventoryWarehouses(inv,rows){
@@ -51,8 +52,10 @@ export function currentStock(rows){
   const baseline=Date.parse(ref.closed_at);if(!Number.isFinite(baseline)){issues.push({code:'unknown_local_baseline_timestamp',id:row.id,warehouse});return false;}
   return timestamp>baseline;
  }
- for(const row of rows.filter(r=>r.kind==='stock_move'&&r.data?.source==='loose')){
+ for(const row of stockMoves(rows)){
   const s=row.data,q=numeric(s.quantity),d=numeric(s.damaged);
+  if(s.action==='unpack'&&s.source==='box'){if(afterBaseline(row,s.from_warehouse))change(s,s.from_warehouse,q,d);continue;}
+  if(s.source!=='loose')continue;
   if(['repack','writeoff','transfer'].includes(s.action)&&afterBaseline(row,s.from_warehouse))change(s,s.from_warehouse,-q,-d);
   if(s.action==='transfer'&&s.to_warehouse&&afterBaseline(row,s.to_warehouse))change(s,s.to_warehouse,q,d);
  }
@@ -112,7 +115,7 @@ function intervalAnalysis(rows,closed,filters){
   const incoming=rows.filter(r=>r.kind==='box'&&r.data?.source!=='repack'&&normalized(r.data?.received_warehouse??r.data?.warehouse)===normalized(warehouse)&&matches(r.data,filters,{warehouse:false})&&Date.parse(r.data?.received_at??r.created_at)>a&&Date.parse(r.data?.received_at??r.created_at)<=b);
   // Receipt metadata is immutable: current box balances may have changed later.
   const entries_sheets=incoming.reduce((sum,r)=>sum+numeric(r.data.received_sheets??r.data.sheets),0);
-  const moves=rows.filter(r=>r.kind==='stock_move'&&matches(r.data,filters,{warehouse:false})&&Date.parse(r.created_at)>a&&Date.parse(r.created_at)<=b);
+  const moves=stockMoves(rows).filter(r=>matches(r.data,filters,{warehouse:false})&&Date.parse(r.created_at)>a&&Date.parse(r.created_at)<=b);
   let transfers_in_sheets=0,transfers_out_sheets=0,confirmed_manual_sheets=0;
   for(const r of moves){const m=r.data,q=numeric(m.quantity);if(m.action==='transfer'){if(normalized(m.to_warehouse)===normalized(warehouse))transfers_in_sheets+=q;if(normalized(m.from_warehouse)===normalized(warehouse))transfers_out_sheets+=q;}else if(m.action==='writeoff'&&normalized(m.from_warehouse)===normalized(warehouse))confirmed_manual_sheets+=q;}
   // Physical quantity includes avarias. Repack is neutral and never a receipt.
@@ -159,4 +162,20 @@ export function buildAnalytics(rows,filters={}){
  }
  const variation=intervalAnalysis(rows,closed,filters);kpis.apparent_average_daily_reduction=variation.average;kpis.manual_average_daily_writeoff=variation.manualAverage;kpis.total_average_daily_reduction=variation.totalAverage;
  return{kpis,meta:{provisional,incomplete:provisional,has_active,last_closed_date:last?.work_date??null,last_closed_id:last?.id??null,history_incomplete:evolution.some(p=>!p.available||!p.available_sheets),history_m2_incomplete:evolution.some(p=>!p.available),history_quantity_incomplete:evolution.some(p=>!p.available_sheets),replenishment_scope:'all_warehouses',replenishment_provisional:replenishmentProvisional,stock_reference:'sealed_now_and_last_closed_loose_per_warehouse',warehouse_references:selectedReferences,variation_days:variation.totalDays,variation_comparable_intervals:variation.points.length,variation_excluded_intervals:variation.excluded,stock_issues:current.issues,variation_apparent_reduction:variation.reductions,variation_confirmed_manual:variation.manual,variation_total_estimated:variation.totalReduction,variation_average_unit:'chapas/local/dia',variation_formula:'sum(confirmed_manual_sheets+apparent_reduction)/sum(elapsed_calendar_days_per_warehouse)',daily_reduction_by_warehouse:variation.rates,evolution_scope:'per_warehouse'},groups,replenishment,charts:{by_color:[...byColor.values()].map(x=>({...x,value:round(x.value)})).sort((a,b)=>b.value-a.value),by_thickness:[...byThickness.values()].map(x=>({...x,value:round(x.value)})).sort((a,b)=>Number(a.label.split(' ')[0])-Number(b.label.split(' ')[0])),variation:variation.points,replenishment_by_type:[...replenishmentByType.values()].map(x=>({...x,needed_m2:round(x.needed_m2)})).sort((a,b)=>b.value-a.value||String(a.label).localeCompare(String(b.label),'pt-BR')),by_type:[...byType.values()].map(x=>({...x,value:round(x.value)})).sort((a,b)=>b.value-a.value),by_warehouse:[...byWarehouse.values()].map(x=>({...x,sealed_m2:round(x.sealed_m2),loose_m2:round(x.loose_m2)})).sort((a,b)=>String(a.label).localeCompare(String(b.label),'pt-BR')),condition:[{label:'Chapas úteis',value:kpis.useful_sheets},{label:'Chapas avariadas',value:kpis.damaged_sheets}],evolution}};
+}
+
+/** Physical stock CSV matrices: full labels and codes; no historical accumulation. */
+export const stockExportHeaders=Object.freeze(['Código','Forma','Situação','Tipo','Cor','Espessura mm','Largura mm','Altura mm','Galpão','Quantidade de caixas','Chapas em caixa','Chapas avulsas','Total chapas','Avarias','Total m²']);
+export function stockItemRows(rows){
+ const stock=currentStock(rows),result=[stockExportHeaders.slice()];
+ const entries=[...stock.boxes.map(row=>({code:row.data.code??row.id,form:'Caixa',status:'Fechada',spec:row.data,boxcount:1,sealed:numeric(row.data.sheets),loose:0,quantity:numeric(row.data.sheets),damaged:numeric(row.data.damaged)})),...stock.loose.map(row=>({code:'',form:'Avulso',status:'Disponível',spec:row.data,boxcount:0,sealed:0,loose:numeric(row.data.quantity),quantity:numeric(row.data.quantity),damaged:numeric(row.data.damaged)}))];
+ entries.sort((a,b)=>normalized(a.spec.warehouse).localeCompare(normalized(b.spec.warehouse),'pt-BR')||sku(a.spec).localeCompare(sku(b.spec))||String(a.code).localeCompare(String(b.code)));
+ for(const e of entries){const s=e.spec;result.push([e.code,e.form,e.status,catalogText(s.type),catalogText(s.color),Number(s.thickness_mm),Number(s.width_mm),Number(s.height_mm),catalogText(s.warehouse),e.boxcount,e.sealed,e.loose,e.quantity,e.damaged,round(e.quantity*sheetArea(s))]);}
+ return result;
+}
+export function stockSummaryRows(rows){
+ const stock=currentStock(rows),groups=aggregateStock(stock.items),boxcounts=new Map();
+ for(const row of stock.boxes){const key=sku(row.data)+'|'+normalized(row.data.warehouse);boxcounts.set(key,(boxcounts.get(key)??0)+1);}
+ groups.sort((a,b)=>normalized(a.warehouse).localeCompare(normalized(b.warehouse),'pt-BR')||a.sku.localeCompare(b.sku));
+ return[stockExportHeaders.slice(),...groups.map(g=>['','Resumo','Estoque atual',g.type,g.color,g.thickness_mm,g.width_mm,g.height_mm,g.warehouse,boxcounts.get(g.key)??0,g.sealed_sheets,g.loose_sheets,g.physical_sheets,g.damaged_sheets,g.physical_m2])];
 }

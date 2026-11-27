@@ -91,7 +91,8 @@ $$;
 create function invd_private.loose_balance(p jsonb)returns jsonb language sql stable set search_path=''as $$
 with base as(select *from public.inventarydaily_table where kind='inventory'and data->>'status'='closed'and invd_private.scope_has(data->'warehouses',p->>'warehouse')order by work_date desc,created_at desc,id desc limit 1),
 lines as(select coalesce(sum((x.data->>'quantity')::bigint),0)q,coalesce(sum((x.data->>'damaged')::bigint),0)d from public.inventarydaily_table x where x.kind='loose'and x.parent_id=(select id from base)and invd_private.catalog_key('warehouse',x.data->>'warehouse')=invd_private.catalog_key('warehouse',p->>'warehouse')and invd_private.sku_key(x.data)=invd_private.sku_key(p)),
-moves as(select coalesce(sum((data->>'quantity')::bigint*(case when invd_private.catalog_key('warehouse',data->>'to_warehouse')=invd_private.catalog_key('warehouse',p->>'warehouse')then 1 else 0 end-case when invd_private.catalog_key('warehouse',data->>'from_warehouse')=invd_private.catalog_key('warehouse',p->>'warehouse')then 1 else 0 end)),0)q,coalesce(sum((data->>'damaged')::bigint*(case when invd_private.catalog_key('warehouse',data->>'to_warehouse')=invd_private.catalog_key('warehouse',p->>'warehouse')then 1 else 0 end-case when invd_private.catalog_key('warehouse',data->>'from_warehouse')=invd_private.catalog_key('warehouse',p->>'warehouse')then 1 else 0 end)),0)d from public.inventarydaily_table where kind='stock_move'and data->>'source'='loose'and created_at>coalesce((select(data->>'closed_at')::timestamptz from base),(select updated_at from base),'-infinity'::timestamptz)and invd_private.sku_key(data)=invd_private.sku_key(p))
+flows as(select data,case when data->>'action'='unpack'then(case when invd_private.catalog_key('warehouse',data->>'from_warehouse')=invd_private.catalog_key('warehouse',p->>'warehouse')then 1 else 0 end)else(case when invd_private.catalog_key('warehouse',data->>'to_warehouse')=invd_private.catalog_key('warehouse',p->>'warehouse')then 1 else 0 end-case when invd_private.catalog_key('warehouse',data->>'from_warehouse')=invd_private.catalog_key('warehouse',p->>'warehouse')then 1 else 0 end)end as sign from public.inventarydaily_table where kind='stock_move'and(data->>'source'='loose'or data->>'action'='unpack')and created_at>coalesce((select(data->>'closed_at')::timestamptz from base),(select updated_at from base),'-infinity'::timestamptz)and invd_private.sku_key(data)=invd_private.sku_key(p)),
+moves as(select coalesce(sum((data->>'quantity')::bigint*sign),0)q,coalesce(sum((data->>'damaged')::bigint*sign),0)d from flows)
 select jsonb_build_object('quantity',lines.q+moves.q,'damaged',lines.d+moves.d,'baseline_id',(select id from base))from lines,moves
 $$;
 revoke all on function invd_private.scope_has(jsonb,text),invd_private.scopes_overlap(jsonb,jsonb),invd_private.sku_key(jsonb),invd_private.loose_balance(jsonb)from public,anon,authenticated;
@@ -158,15 +159,15 @@ select * into prev from public.inventarydaily_table where kind='log' and data->>
 if prev.id is not null then
  if prev.created_by<>actor.id or prev.data->>'action'<>p_action or prev.data->'payload'<>p_payload then raise exception 'Identificador de requisição já utilizado.';end if;
  return prev.data->'result';end if;
-if p_action in('stock_repack','stock_writeoff','stock_transfer')then
+if p_action in('stock_repack','stock_writeoff','stock_transfer','stock_unpack')then
 if length(trim(coalesce(p_payload->>'reason','')))not between 3 and 2000 then raise exception 'Informe o motivo da movimentação (de 3 a 2000 caracteres).';end if;
-source_kind:=case when p_action='stock_repack'then'loose'else p_payload->>'source'end;
+source_kind:=case when p_action='stock_repack'then'loose'when p_action='stock_unpack'then'box'else p_payload->>'source'end;
 if source_kind is null or source_kind not in('box','loose')then raise exception 'Selecione caixa ou chapas avulsas.';end if;
 box.id:=null;
 if source_kind='box'then
  select *into box from public.inventarydaily_table where id=(p_payload->>'box_id')::uuid and kind='box'for update;
  if box.id is null or box.data->>'status'<>'sealed'then raise exception 'Selecione uma caixa fechada com saldo disponível.';end if;
- v:=invd_private.spec(box.data||jsonb_build_object('quantity',coalesce(p_payload->'quantity',box.data->'sheets'),'damaged',case when p_action='stock_transfer'then box.data->'damaged'else coalesce(p_payload->'damaged','0'::jsonb)end),true);
+ v:=invd_private.spec(box.data||jsonb_build_object('quantity',case when p_action='stock_unpack'then box.data->'sheets'else coalesce(p_payload->'quantity',box.data->'sheets')end,'damaged',case when p_action in('stock_transfer','stock_unpack')then box.data->'damaged'else coalesce(p_payload->'damaged','0'::jsonb)end),true);
  available_q:=(box.data->>'sheets')::bigint;available_d:=(box.data->>'damaged')::bigint;
 else
  v:=invd_private.spec(p_payload,true);
@@ -177,7 +178,7 @@ else
  end loop;
  balance:=invd_private.loose_balance(v);available_q:=(balance->>'quantity')::bigint;available_d:=(balance->>'damaged')::bigint;
 end if;
-move_q:=(v->>'quantity')::bigint;move_d:=(v->>'damaged')::bigint;from_loc:=v->>'warehouse';to_loc:=null;
+move_q:=(v->>'quantity')::bigint;move_d:=(v->>'damaged')::bigint;from_loc:=v->>'warehouse';to_loc:=case when p_action='stock_unpack'then from_loc else null end;
 if p_action='stock_transfer'then
  to_loc:=invd_private.catalog_value('warehouse',p_payload->>'to_warehouse');
  if to_loc is null then raise exception 'Selecione um local de destino cadastrado.';end if;
@@ -189,7 +190,7 @@ if move_q>available_q or move_d>available_d or move_q-move_d>available_q-availab
 -- Metadados da entrada original ficam imutáveis mesmo após baixas e transferências.
 if source_kind='box'then
  box.data:=box.data||jsonb_build_object('received_at',coalesce(box.data->'received_at',to_jsonb(box.created_at)),'received_warehouse',coalesce(box.data->'received_warehouse',box.data->'warehouse'),'received_sheets',coalesce(box.data->'received_sheets',box.data->'sheets'),'received_damaged',coalesce(box.data->'received_damaged',box.data->'damaged'));
- update public.inventarydaily_table set data=box.data||case when p_action='stock_transfer'then jsonb_build_object('warehouse',to_loc)else jsonb_build_object('sheets',available_q-move_q,'damaged',available_d-move_d,'status',case when available_q=move_q then'depleted'else'sealed'end)end,updated_at=clock_timestamp()where id=box.id;
+ update public.inventarydaily_table set data=box.data||case when p_action='stock_transfer'then jsonb_build_object('warehouse',to_loc)when p_action='stock_unpack'then jsonb_build_object('status','opened','opened_on',(now()at time zone'America/Manaus')::date,'opened_at',clock_timestamp())else jsonb_build_object('sheets',available_q-move_q,'damaged',available_d-move_d,'status',case when available_q=move_q then'depleted'else'sealed'end)end,updated_at=clock_timestamp()where id=box.id;
 end if;
 new_box_id:=null;
 if p_action='stock_repack'then
@@ -200,8 +201,9 @@ if p_action='stock_repack'then
  insert into public.inventarydaily_table(id,kind,data,created_by,created_by_name,created_at,updated_at)values(new_box_id,'box',(v-'quantity')||jsonb_build_object('code',val,'invoice','Sem NF identificada','source','repack','status','sealed','sheets',move_q,'damaged',move_d,'received_at',event_time,'received_warehouse',from_loc,'received_sheets',move_q,'received_damaged',move_d),actor.id,actor.full_name,event_time,event_time);
 end if;
 v:=v-'quantity'-'warehouse'-'notes';
-v:=v||jsonb_build_object('action',case p_action when'stock_repack'then'repack'when'stock_transfer'then'transfer'else'writeoff'end,'source',source_kind,'from_warehouse',from_loc,'to_warehouse',to_loc,'quantity',move_q,'damaged',move_d,'box_id',box.id,'created_box_id',new_box_id,'reason',trim(p_payload->>'reason'));
+v:=v||jsonb_build_object('action',case p_action when'stock_repack'then'repack'when'stock_transfer'then'transfer'when'stock_unpack'then'unpack'else'writeoff'end,'source',source_kind,'from_warehouse',from_loc,'to_warehouse',to_loc,'quantity',move_q,'damaged',move_d,'box_id',box.id,'created_box_id',new_box_id,'reason',trim(p_payload->>'reason'));
 insert into public.inventarydaily_table(kind,data,created_by,created_by_name,created_at,updated_at)values('stock_move',v,actor.id,actor.full_name,clock_timestamp(),clock_timestamp())returning id into row_id;
+if p_action='stock_unpack'then update public.inventarydaily_table set data=data||jsonb_build_object('opened_by_move',row_id)where id=box.id;end if;
 out:=jsonb_build_object('id',row_id,'box_id',coalesce(new_box_id,box.id),'quantity',move_q,'damaged',move_d);
 elsif p_action='reorder_rule_save'then
 
